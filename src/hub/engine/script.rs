@@ -13,7 +13,7 @@ use crate::{
     commands, git,
     hub::{Hop, Hub, HubEntry, HubMember, HubStep, JobStatus, ME, StepStatus, TargetKind, next_id, parse_post, targets},
     settings::{Tab, tab_name_for},
-    state,
+    state::{self, Shell},
 };
 
 use super::{
@@ -334,8 +334,8 @@ async fn call_scripts(hub: Hub, job_id: &str, text: &str, vars: &Vars) -> Result
 // ---- in-app actions --------------------------------------------------------------
 
 /// `addWorkspaceTabs`: tabs for `paths` not yet open, in `group`.
-fn add_workspace_tabs(hub: Hub, paths: &[String], group: Option<&str>) {
-    hub.shell.update_settings(|s| {
+pub(crate) fn add_workspace_tabs(shell: Shell, paths: &[String], group: Option<&str>) {
+    shell.update_settings(|s| {
         let mut taken: Vec<String> = s.tabs.iter().chain(&s.pinned).map(|t| t.path.clone()).collect();
         for path in paths {
             if taken.contains(path) {
@@ -354,17 +354,17 @@ fn add_workspace_tabs(hub: Hub, paths: &[String], group: Option<&str>) {
     });
 }
 
-struct Cut {
-    branch: String,
-    path: String,
-    existed: bool,
-    setup_failed: Vec<String>,
+pub(crate) struct Cut {
+    pub(crate) branch: String,
+    pub(crate) path: String,
+    pub(crate) existed: bool,
+    pub(crate) setup_failed: Vec<String>,
 }
 
 /// The headless sibling of `new <name> -bw`: a worktree for each branch,
 /// serially (`git worktree add` takes the repo lock). Returns what landed
 /// and the failure that stopped it (`handleCreateWorktrees`).
-fn cut_branches(directory: &str, branches: &[String], parent: Option<&str>, home: &str) -> (Vec<Cut>, Option<String>) {
+pub(crate) fn cut_branches(directory: &str, branches: &[String], parent: Option<&str>, home: &str) -> (Vec<Cut>, Option<String>) {
     let mut cuts = Vec::new();
     for branch in branches {
         match git::worktree_for_branch(directory, branch) {
@@ -430,7 +430,7 @@ async fn in_app(hub: Hub, job_id: &str, action: InAppAction, args: &std::collect
             return Err(format!("no folder at {path}"));
         }
         let group = arg("group", vars);
-        add_workspace_tabs(hub, std::slice::from_ref(&path), (!group.is_empty()).then_some(group.as_str()));
+        add_workspace_tabs(hub.shell, std::slice::from_ref(&path), (!group.is_empty()).then_some(group.as_str()));
         if let Some(name) = args.get("as") {
             vars.insert(name.clone(), Var::Str(workspace_handle(hub, &path)));
         }
@@ -474,7 +474,7 @@ async fn in_app(hub: Hub, job_id: &str, action: InAppAction, args: &std::collect
             let (cuts, failure) = git::off_thread(move || cut_branches(&directory, &b, p.as_deref(), &home)).await;
             // One settings write for everything that landed, even when a later branch failed.
             if !cuts.is_empty() {
-                add_workspace_tabs(hub, &cuts.iter().map(|c| c.path.clone()).collect::<Vec<_>>(), group.as_deref());
+                add_workspace_tabs(hub.shell, &cuts.iter().map(|c| c.path.clone()).collect::<Vec<_>>(), group.as_deref());
             }
             if let Some(failure) = failure {
                 let made = if cuts.is_empty() { String::new() } else { format!(" Made: {}.", cuts.iter().map(|c| c.branch.as_str()).collect::<Vec<_>>().join(", ")) };

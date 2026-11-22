@@ -50,14 +50,28 @@ pub struct Notes {
     pub memories: Signal<HashMap<String, Vec<Memory>>>,
     /// Terminals running omp: the only ones that show the strip.
     pub omp: Signal<Vec<u64>>,
+    /// Bumped to re-read the folders now rather than at the next 3s poll
+    /// (`refreshNotesAtom` after `saveNote`).
+    tick: Signal<u32>,
 }
 
-fn notes_dir() -> PathBuf {
+thread_local! {
+    static PROVIDED: std::cell::Cell<Option<Notes>> = const { std::cell::Cell::new(None) };
+}
+
+/// Re-reads the notes now, from code with no UI context (the MCP tools).
+pub fn refresh() {
+    if let Some(n) = PROVIDED.with(|p| p.get()) {
+        n.tick.update(|t| *t += 1);
+    }
+}
+
+pub fn notes_dir() -> PathBuf {
     settings::bolt_data_dir().join("bolt-notes")
 }
 
 /// `group-sessions/<home path, sanitized>/memories` (`groupMemoriesDir`).
-fn memories_dir(home: &str) -> PathBuf {
+pub fn memories_dir(home: &str) -> PathBuf {
     let key: String = home
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
@@ -124,7 +138,7 @@ fn mtime(path: &std::path::Path) -> Option<f64> {
     Some(t.as_secs_f64() * 1000.0)
 }
 
-fn md_files(dir: &std::path::Path) -> Vec<(String, PathBuf, f64)> {
+pub fn md_files(dir: &std::path::Path) -> Vec<(String, PathBuf, f64)> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut out: Vec<(String, PathBuf, f64)> = entries
         .filter_map(Result::ok)
@@ -165,14 +179,15 @@ fn group_home<'a>(tabs: &'a [Tab], group: &str, groups: &[String]) -> Option<&'a
 /// (Bolt's status poll), the notes and memories every 3s while an omp runs
 /// (`useNotesPoll`).
 pub fn provide(shell: Shell) -> Notes {
-    let notes = Notes { notes: signal(Vec::new()), memories: signal(HashMap::new()), omp: signal(Vec::new()) };
+    let tick = signal(0_u32);
+    let notes = Notes { notes: signal(Vec::new()), memories: signal(HashMap::new()), omp: signal(Vec::new()), tick };
     provide_context(notes);
+    PROVIDED.with(|p| p.set(Some(notes)));
     set_interval(Duration::from_millis(1500), move || {
         let ids: Vec<u64> = shell.terms.with_untracked(|t| t.iter().map(|t| t.id).collect());
         let omp: Vec<u64> = ids.into_iter().filter(|id| engine::terminal_status(*id).agent.as_deref() == Some("omp")).collect();
         notes.omp.set(omp);
     });
-    let tick = signal(0_u32);
     set_interval(Duration::from_millis(3000), move || tick.update(|n| *n += 1));
     effect(move || {
         tick.get();

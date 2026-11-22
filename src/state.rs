@@ -42,16 +42,41 @@ pub struct Term {
 }
 
 /// A file open for editing in a workspace's columns (notes,
-/// `keybindings.json`; Bolt's file tab: `mode: "file"`), shown as its text
-/// or as its changes against `HEAD`.
+/// `keybindings.json`, what the MCP `openFile` shows; Bolt's file tab:
+/// `mode: "file"`), shown as its text or as its changes against `HEAD`; or,
+/// with a [`Proposal`], a diff tab (Bolt's `mode: "diff"`, `openDiffAtom`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Doc {
     pub id: u64,
     /// The workspace whose columns hold it.
     pub cwd: String,
-    /// The file, absolute.
+    /// The file, absolute. A proposal's is the file it proposes changes to,
+    /// which nothing reads or writes for the tab.
     pub path: String,
     pub mode: DocMode,
+    /// Set: a diff tab over this text instead of the file.
+    pub proposal: Option<Proposal>,
+    /// A range the file's editor selects once it shows, then clears
+    /// (`pendingRevealAtom`).
+    pub select: Option<Select>,
+}
+
+/// What a diff tab compares: the file as it was when the tab opened and the
+/// text proposed for it (`openDiffAtom`'s `original` and `modified`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Proposal {
+    /// The `tab_name` the caller gave, which `close_tab` also answers to.
+    pub name: Option<String>,
+    pub original: String,
+    pub modified: String,
+}
+
+/// A range of a file's text, as (line, column) from 0, columns in UTF-16
+/// code units (the editor's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Select {
+    pub anchor: (u32, u32),
+    pub head: (u32, u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -523,18 +548,47 @@ impl Shell {
     /// `keybindings.json`), saved as it is typed, and shows it: the tab
     /// already open on it if there is one, else a new one.
     pub fn open_editable(&self, cwd: String, path: String) {
-        let open = self.docs.with_untracked(|d| d.iter().find(|d| d.cwd == cwd && d.path == path).map(|d| d.id));
+        self.open_editable_at(cwd, path, None);
+    }
+
+    /// [`Self::open_editable`], then `select` selected once the editor shows
+    /// (`openFileAtLineAtom`).
+    pub fn open_editable_at(&self, cwd: String, path: String, select: Option<Select>) {
+        let open = self.docs.with_untracked(|d| d.iter().find(|d| d.cwd == cwd && d.path == path && d.proposal.is_none()).map(|d| d.id));
         if let Some(id) = open {
             self.docs.update(|d| {
                 if let Some(doc) = d.iter_mut().find(|d| d.id == id) {
                     doc.mode = DocMode::File;
+                    doc.select = select;
                 }
             });
             self.show(id);
             return;
         }
         let id = next_id();
-        self.docs.update(|d| d.push(Doc { id, cwd: cwd.clone(), path, mode: DocMode::File }));
+        self.docs.update(|d| d.push(Doc { id, cwd: cwd.clone(), path, mode: DocMode::File, proposal: None, select }));
+        let new_column = self.opens_new_column();
+        self.columns.update(|c| c.entry(cwd).or_default().add(id, new_column));
+    }
+
+    /// Opens a diff tab of `path` against proposed text and shows it
+    /// (`openDiffAtom`): the tab already open on `path` is shown again, with
+    /// the new text (Bolt's keeps the first).
+    pub fn open_proposal(&self, cwd: String, path: String, proposal: Proposal) {
+        let open = self.docs.with_untracked(|d| d.iter().find(|d| d.cwd == cwd && d.path == path && d.proposal.is_some()).map(|d| d.id));
+        if let Some(id) = open {
+            self.docs.update(|d| {
+                if let Some(doc) = d.iter_mut().find(|d| d.id == id) {
+                    doc.proposal = Some(proposal);
+                }
+            });
+            self.show(id);
+            return;
+        }
+        let id = next_id();
+        self.docs.update(|d| {
+            d.push(Doc { id, cwd: cwd.clone(), path, mode: DocMode::Diff { unified: false }, proposal: Some(proposal), select: None })
+        });
         let new_column = self.opens_new_column();
         self.columns.update(|c| c.entry(cwd).or_default().add(id, new_column));
     }

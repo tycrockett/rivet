@@ -1,0 +1,1317 @@
+[
+  {
+    "name": "openFile",
+    "description": "Open a file in the editor, optionally selecting a range of text",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filePath": {
+          "type": "string",
+          "description": "Absolute path to the file to open"
+        },
+        "preview": {
+          "type": "boolean",
+          "description": "Whether to open in preview mode",
+          "default": false
+        },
+        "startText": {
+          "type": "string",
+          "description": "Text to start selection at"
+        },
+        "endText": {
+          "type": "string",
+          "description": "Text to end selection at"
+        },
+        "selectToEndOfLine": {
+          "type": "boolean",
+          "description": "Whether to select to end of line",
+          "default": false
+        },
+        "makeFrontmost": {
+          "type": "boolean",
+          "description": "Whether to bring the IDE to the front",
+          "default": true
+        }
+      },
+      "required": [
+        "filePath"
+      ]
+    }
+  },
+  {
+    "name": "getOpenEditors",
+    "description": "Get information about all currently open editor tabs",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "getWorkspaceFolders",
+    "description": "Get all workspace folders currently open in the IDE",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "getWorkspaceTabs",
+    "description": "The workspace tabs open in Bolt's strip: every directory the user keeps at hand, the group it sits in, whether it is pinned, hidden, or the one currently open, and the git state behind it — branch, dirty/staged/untracked/conflicted, ahead/behind, and whether the directory is a worktree and of which repo. Pinned tabs come first, as the strip draws them. A tab with groupHome true is its group's session home: the hidden worktree on the group branch where the group's main session runs, shown above the group's tabs rather than among them. Use it to answer which branches and worktrees the user has going, rather than inferring it from one cwd.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "getCurrentSelection",
+    "description": "Get the current text selection in the active editor",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "getDiagnostics",
+    "description": "Get language diagnostics (errors, warnings) from open files",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string",
+          "description": "Optional file URI to get diagnostics for. If not provided, returns diagnostics for all files."
+        }
+      }
+    }
+  },
+  {
+    "name": "saveDocument",
+    "description": "Save a document with unsaved changes",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filePath": {
+          "type": "string",
+          "description": "Path to the file to save"
+        }
+      },
+      "required": [
+        "filePath"
+      ]
+    }
+  },
+  {
+    "name": "checkDocumentDirty",
+    "description": "Check if a document has unsaved changes",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filePath": {
+          "type": "string",
+          "description": "Path to the file to check"
+        }
+      },
+      "required": [
+        "filePath"
+      ]
+    }
+  },
+  {
+    "name": "openDiff",
+    "description": "Open a diff view comparing two versions of a file",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "old_file_path": {
+          "type": "string",
+          "description": "Path to the original file"
+        },
+        "new_file_path": {
+          "type": "string",
+          "description": "Path to the new file"
+        },
+        "new_file_contents": {
+          "type": "string",
+          "description": "Contents of the new file"
+        },
+        "tab_name": {
+          "type": "string",
+          "description": "Name for the diff tab"
+        }
+      },
+      "required": [
+        "old_file_path",
+        "new_file_path",
+        "new_file_contents"
+      ]
+    }
+  },
+  {
+    "name": "close_tab",
+    "description": "Close an editor tab by name",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tab_name": {
+          "type": "string",
+          "description": "Name/path of the tab to close"
+        }
+      },
+      "required": [
+        "tab_name"
+      ]
+    }
+  },
+  {
+    "name": "closeAllDiffTabs",
+    "description": "Close all diff tabs in the editor",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "getLatestSelection",
+    "description": "Get the most recent text selection, even if not in the active editor",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "getInspectedElement",
+    "description": "Get the element the user last shift+clicked in one of Bolt's web tabs: its css selector, tag, id, classes, visible text, data-* attributes, bounding box, page url, outer HTML, and a screenshot cropped to the element itself.\n\nThis is how the user points at something in a running page and says \"this one\" — reach for it whenever they refer to a thing on screen rather than a thing in a file. It holds only the most recent click, so read it when they mention one.\n\n`path` writes that cropped screenshot to disk as a PNG as well as returning it inline. Pass it whenever the user wants the image kept rather than just looked at — saved, attached to something, compared against a later run, or handed to another tool. If they want it kept and named no path, ask where to put it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Optional file to write the cropped screenshot to, as PNG. A relative path resolves against the workspace Bolt has open; an absolute one is used as given. Missing directories are created."
+        }
+      }
+    }
+  },
+  {
+    "name": "browse",
+    "description": "Drive the web tab the user currently has showing in Bolt.\n\n`read` (page or one selector's text), `screenshot`, `draw` and `clear` always work. `draw` puts `shapes` on a see-through layer over the tab so you can point the user at something — box the element you just changed, arrow to it, write a note; the page underneath stays usable and is never touched. Drawings add up across calls, move with the page as it scrolls, and are wiped by `clear` or a navigation. `screenshot` does not show them. `console` returns the page's console messages and `network` its requests (method, status, url, type), both since the page last loaded; `devtools` opens Chrome DevTools for the tab in its own window. These three always work too. `navigate`, `click` and `type` only work while the user has armed that tab with the robot button in its toolbar, and are refused otherwise — so ask them to arm it rather than retrying.\n\nOnly do this when the user has asked you to; it acts on a real browser in front of them, and a click here can submit a form or spend money exactly as theirs would.\n\nFor `screenshot`, `path` writes the PNG to disk as well as returning it inline. Pass it whenever the user wants the image kept rather than just looked at — saved, attached to something, compared against a later run, or handed to another tool. If they want it kept and named no path, ask where to put it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "navigate",
+            "click",
+            "type",
+            "read",
+            "screenshot",
+            "draw",
+            "clear",
+            "console",
+            "network",
+            "devtools"
+          ],
+          "description": "What to do with the tab."
+        },
+        "url": {
+          "type": "string",
+          "description": "For navigate: where to go."
+        },
+        "selector": {
+          "type": "string",
+          "description": "For click and type: the css selector of the target. For read: limits it to that element."
+        },
+        "text": {
+          "type": "string",
+          "description": "For type: what to put in the field. For network: only requests whose url contains this, newest five, returned with their response bodies."
+        },
+        "shapes": {
+          "type": "array",
+          "description": "For draw. Coordinates are css pixels in the tab's visible viewport, top-left 0,0 — the same space as getBoundingClientRect. A box can give `selector` instead of x/y/width/height to wrap that element; the first one is scrolled into view.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "box",
+                  "arrow",
+                  "text",
+                  "path"
+                ]
+              },
+              "selector": {
+                "type": "string",
+                "description": "box: wrap this element."
+              },
+              "x": {
+                "type": "number",
+                "description": "box: left. text: start of the baseline."
+              },
+              "y": {
+                "type": "number",
+                "description": "box: top. text: baseline."
+              },
+              "width": {
+                "type": "number",
+                "description": "box."
+              },
+              "height": {
+                "type": "number",
+                "description": "box."
+              },
+              "from": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "arrow: tail [x, y]."
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "arrow: head [x, y]."
+              },
+              "points": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "description": "path: freehand [[x, y], ...]."
+              },
+              "text": {
+                "type": "string",
+                "description": "text: what to write."
+              },
+              "label": {
+                "type": "string",
+                "description": "Optional note drawn beside a box, arrow or path."
+              },
+              "color": {
+                "type": "string",
+                "description": "Optional css color; amber by default."
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        },
+        "path": {
+          "type": "string",
+          "description": "For screenshot: optional file to write the PNG to. A relative path resolves against the workspace Bolt has open; an absolute one is used as given. Missing directories are created."
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "runCommand",
+    "description": "Run a command in Bolt's command palette, exactly as the user would type it, so the work lands in their window instead of only in this chat.\n\nOnly six verbs are reachable, and anything else is refused rather than run: `new` (create a branch and/or worktree, which also adds the workspace tab and moves Bolt into it), `go` (switch branch), `tab` (workspace tabs), `edit` (open a file) and `delete` (delete a branch; `delete my-branch -b` also removes its worktree and tab, behind a confirm the user answers) and `browser` (open a URL in a web tab; `browser <url> -o` hands it to the system browser instead). `tab --name <name> --path <tab path>` renames any workspace tab (paths from getWorkspaceTabs) without moving the window. `commit`, `merge`, `stash` and `push` are deliberately not on this list — say what you would run and let the user run it.\n\nFlags are the palette's own, not git's: `new my-branch -b` makes the branch, `-w` makes a worktree, `-bw` does both, and bare `new my-branch` does both too.\n\nPass a list, in order: one call runs them one after another in the same window, so a branch and the files to open inside it are a single call instead of four. Each command sees what the one before it did. A failure stops the batch there and tells you what ran and what did not, and a verb that is not on the list refuses the whole batch before any of it runs.\n\ncwd must be the workspace Bolt currently has open, because a command acts on that window. If it names a different repo the call is refused and tells you which one is open.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The command lines to run, in order, e.g. [\"new my-branch -bw\", \"edit src/App.tsx\"]."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Absolute path of the repo the command runs in; must be the workspace Bolt has open."
+        }
+      },
+      "required": [
+        "command",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "createWorktrees",
+    "description": "Cut one branch and worktree per name, add a workspace tab for each, and leave the user exactly where they are. This is the tool for setting a project's branches up: unlike runCommand's `new <name> -bw` it never moves Bolt into what it just made, opens no palette and changes no editor tab, so it is safe to call while the user is working. `git worktree add` writes a new directory and touches neither HEAD nor the working tree of the repo you name, so nothing under the user's hands changes.\n\nRunning the same call twice is safe: a branch that already has a worktree comes back with existed true rather than failing the batch, and a tab already pointing at that path is left alone.\n\ncwd is the repo the branches are cut from. It does not have to be the workspace Bolt has open, because none of this moves the window.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The branch names to create, in order, e.g. [\"auth-intake\", \"auth-callback\"]."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Absolute path of the repo the branches are cut from."
+        },
+        "parent": {
+          "type": "string",
+          "description": "The branch to cut from. Defaults to the repo's current HEAD."
+        },
+        "group": {
+          "type": "string",
+          "description": "Bucket the new tabs under this workspace group, creating the group if it does not exist. One group per project keeps a cut plan's worktrees together in the strip. A group may span repos (call again with another cwd and the same group): its session's branch lives in the repo most members are in."
+        }
+      },
+      "required": [
+        "branches",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "startAgents",
+    "description": "Start a Claude session in each named workspace tab, all on the same prompt, and leave the user exactly where they are. Each tab gets a new terminal that types the user's agent command (settings.agentCommand, default `c`) followed by the prompt, shell-quoted. A tab other than the one on screen gets its terminal in the background, under that workspace's terminal chips.\n\npaths must be workspace tab paths exactly as getWorkspaceTabs returns them. Any other path refuses the whole call before anything starts. A failure stops the batch there and names what already started.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Absolute paths of the workspace tabs to start a session in, as getWorkspaceTabs returns them."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The first message every session starts with, verbatim. Omit to start them without one."
+        }
+      },
+      "required": [
+        "paths"
+      ]
+    }
+  },
+  {
+    "name": "startGroupSession",
+    "description": "Start a session in a workspace group's home: an omp agent (settings.groupAgentCommand, default `omp`) in a worktree on the group branch that Bolt shows above the group's tabs. Each call opens one more session beside any already running there. The group's instructions live in the home's .omp/APPEND_SYSTEM.md (git-excluded), which omp loads on every start and resume, so any omp opened in the home is a group session: it writes the shared code on the group branch, keeps the members' branches in sync, and shares the group's memories, one file per memory in a folder deleted when the group is removed. Bolt shows them as tiles under the group's omp terminals.\n\nThe home is made on first start and reused after. A group may span repos: the home goes in the repo most members are in (a tie goes to the repo whose member comes first in the strip), and only that repo's members are branch members kept in sync with the group branch. Members in other repos are outside members: the session coordinates them through their worktrees and terminals and keeps the contracts between the repos consistent, but never merges across repos. The group branch is the <project> root when the home repo's members are a <project>--<slice> cut, else the group name as a branch; an existing worktree on that branch is adopted (a member tab on it moves up into the home), otherwise one is cut from the repo's default branch. The terminal opens in the background and the user stays where they are.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "string",
+          "description": "The group's name, as getWorkspaceTabs reports it."
+        }
+      },
+      "required": [
+        "group"
+      ]
+    }
+  },
+  {
+    "name": "setTabGroup",
+    "description": "Move workspace tabs into a group, creating the group if it does not exist, or out of their group with group null. Nothing closes and no git runs. A group's home tab (groupHome true) cannot be moved this way. A group may hold tabs from several repos; its session's branch lives in the repo most of them are in, and the rest are coordinated rather than merged.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace tab paths, exactly as getWorkspaceTabs returns them. Pinned tabs are not grouped."
+        },
+        "group": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The group to move them into, or null to ungroup them."
+        }
+      },
+      "required": [
+        "paths",
+        "group"
+      ]
+    }
+  },
+  {
+    "name": "closeTabs",
+    "description": "Close workspace tabs: they leave the strip, and their worktree, branch and any running terminals stay as they are (the terminals stay reachable under Open Directories). Deleting a worktree is not this tool: that is runCommand `delete`, behind the user's own confirm.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace tab paths, exactly as getWorkspaceTabs returns them."
+        }
+      },
+      "required": [
+        "paths"
+      ]
+    }
+  },
+  {
+    "name": "sendToTerminals",
+    "description": "Type a line into terminals that are already open, exactly as the user would. This is the tool for \"run this in each terminal\" -- it never opens a new one, so the sessions the user is already watching are the ones that act.\n\nsessionIds come from getWorkspaceTabs, whose every tab now lists its terminals with their status and what each is doing, ordered most recently active first -- so the first one is the session the user is working in, and the last is usually something they left open. Read that first: naming a terminal is what makes this reachable, and an id that is not open refuses the whole call before anything is sent.\n\nUse startAgents instead when the point is to begin a fresh Claude session rather than talk to a running one. Do not use either to answer a terminal's own permission or choice dialog -- that is the user's, and a terminal whose needsInput is true is waiting on them, not on you.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The terminals to type into, exactly as getWorkspaceTabs reports them."
+        },
+        "text": {
+          "type": "string",
+          "description": "The line to type, sent followed by Enter."
+        }
+      },
+      "required": [
+        "sessionIds",
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "readTerminals",
+    "description": "What terminals have actually said, so a decision about them rests on their words rather than a guess. For a terminal running claude this is its transcript -- the last exchanges, and the question it is blocked on when it is blocked -- read from the session file, not the screen. For a plain shell it is the ANSI-stripped tail of what scrolled past.\n\nsessionIds come from getWorkspaceTabs. Read this before sendToTerminals when the next line depends on what the last one did, and before telling the user a session is stuck: `needsInput` says one is waiting, this says what for. A terminal whose pendingQuestion is set is waiting on the user -- report it, never answer it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The terminals to read, exactly as getWorkspaceTabs reports them."
+        },
+        "lines": {
+          "type": "number",
+          "description": "How many lines of shell scrollback to return when a terminal has no claude in it. Default 60."
+        }
+      },
+      "required": [
+        "sessionIds"
+      ]
+    }
+  },
+  {
+    "name": "readBoard",
+    "description": "Read an invite-only Bolt board: notes the user and the sessions invited to it left for each other, headed by the terminals on it (@handle and label). Notes flagged for you come first, marked [flagged for you], and reading clears those flags. Only invited sessions can read one; listBoards says which you are on. Newest last.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "How many of the latest entries to return. Default 20."
+        },
+        "board": {
+          "type": "string",
+          "description": "The board's name, from listBoards."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your own working directory; Bolt uses it to find your terminal."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Your Claude session id, if you know it. Makes finding your terminal exact."
+        }
+      }
+    }
+  },
+  {
+    "name": "listBoards",
+    "description": "List the invite-only Bolt boards you have been invited to, with the terminals on each (@handle and label). The user makes a board and invites sessions to it; invited sessions share notes there with readBoard and postBoard.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string",
+          "description": "Your own working directory; Bolt uses it to find your terminal."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Your Claude session id, if you know it. Makes finding your terminal exact."
+        }
+      },
+      "required": [
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "postBoard",
+    "description": "Leave a note on an invite-only Bolt board you have been invited to. The user and every other session on the board can read it with readBoard. Use it for what the others on the board would be wrong without: a decision, a contract, a port you took, a handoff. Mention a member as @handle (from listBoards) to flag the note for them: it waits on the board with an unread badge until they call readBoard, and nothing is typed into their session. Set push only when the user told you to ask or tell that member something; push types the note into their session so they answer. Never push a reply.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "board": {
+          "type": "string",
+          "description": "The board's name, from listBoards."
+        },
+        "text": {
+          "type": "string",
+          "description": "The note."
+        },
+        "push": {
+          "type": "boolean",
+          "description": "Type the note into each @mentioned member's session. Only when the user asked you to reach that member; default false just flags it."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your own working directory; Bolt uses it to find your terminal."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Your Claude session id, if you know it. Makes finding your terminal exact."
+        }
+      },
+      "required": [
+        "board",
+        "text",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "graphUpsert",
+    "description": "Draw nodes and edges in the graph panel attached to YOUR terminal: it opens to the right of the terminal you are running in, and it belongs to that terminal alone. The user drives this exploration, so add exactly what they ask for -- \"create nodes for these 3 things\" is three nodes -- and never fill the graph in on your own.\n\nA node's title is the concrete name from the code: a table, function, class, file, endpoint or job exactly as it is spelled there (mobile_line, createInvoice, POST /transfers), never a paraphrase. kind is one lowercase word for what it is (table, function, endpoint, worker, component). file and line point at its definition, repo-relative. Leave description empty: explanations belong in your reply in the session, and the description is the user's to write. Edges say how one feeds the next; label them only when the label adds something (writes, calls, emits).\n\nNodes are matched by id, which defaults to the title, so re-sending a node updates it and an edge needs both ends to exist. Lay the graph out yourself so it reads at a glance: send x and y (top-left corner in px, snapped to the 20px grid) for every new node, never one long row. Default to wrapping left to right like text -- a few nodes per row, the next row below -- and pick another shape (a column per group, a parent with its list beneath it) when the content calls for it. Cards are 40px tall and grow wider with the title; leave at least 40px between nodes in a row and 80px between rows. When adding to a graph, call graphRead for current positions and place new nodes in free space; nodes the user has moved stay where they are. Nodes sent without x and y fall back to Bolt's left-to-right layout. Set status only when the user asks, or when they decide a node is worth exploring or a dead end; re-send just {id, status} to change it. When the user has dropped a landmark (graphRead shows it, and they say \"here\" or \"right here\"), send new nodes without x and y: Bolt lays them out centered on the landmark, then clears it. Call graphRead first when adding to a graph you did not just draw.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string",
+          "description": "Your own working directory; Bolt uses it to find your terminal."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Your Claude session id, if you know it. Makes finding your terminal exact."
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Defaults to title."
+              },
+              "title": {
+                "type": "string",
+                "description": "The exact name from the code."
+              },
+              "kind": {
+                "type": "string",
+                "description": "Free text. These words also draw an icon: domain, capability, workflow, business_entity, business_rule, service, function, api_endpoint, endpoint, event, queue, trigger, scheduled_job, job, worker, ui_surface, component, database, db_table, table, db_column, column, model, variable, cache, file, external_vendor, vendor, external_api, config, infrastructure, human_role."
+              },
+              "file": {
+                "type": "string"
+              },
+              "line": {
+                "type": "number"
+              },
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "explore",
+                  "ignore",
+                  ""
+                ],
+                "description": "explore: worth digging into next. ignore: explored, a dead end. Empty string clears it."
+              },
+              "color": {
+                "type": "string",
+                "description": "Any CSS color (#e5534b, teal) to tint the card. Empty string clears it. Only when the user asks."
+              }
+            },
+            "required": [
+              "title"
+            ]
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "Source node id."
+              },
+              "to": {
+                "type": "string",
+                "description": "Target node id."
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ]
+          }
+        }
+      },
+      "required": [
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "graphRead",
+    "description": "Read the graph panel attached to your terminal: its nodes (with any description the user wrote on them) and edges. Read it before adding to a graph, and when the user asks about a node by name.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string",
+          "description": "Your own working directory; Bolt uses it to find your terminal."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Your Claude session id, if you know it."
+        }
+      },
+      "required": [
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "graphRemove",
+    "description": "Remove nodes (and every edge touching them) or single edges from the graph panel attached to your terminal. Only when the user asks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string",
+          "description": "Your own working directory; Bolt uses it to find your terminal."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Your Claude session id, if you know it."
+        },
+        "nodeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "edgeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "As graphRead reports them: from->to."
+        }
+      },
+      "required": [
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "saveNote",
+    "description": "Save a bolt note: a markdown snippet the user keeps in Bolt and pastes into an agent session with one click, from the notes strip under the terminal. Use it when the user asks for a bolt note (\"create a handoff note as a bolt note\"). The text is pasted verbatim into another session's prompt, so write it as the message that session should receive. Saving under a name that already exists replaces that note: that is how a note is edited.\n\nMENTIONS. When the user names the session the note is for, write its @handle in the text: `@backend/k3f9` for one terminal, `@backend` for every terminal in that workspace. That note is then highlighted in the strip under the mentioned terminal. getWorkspaceTabs gives each workspace's and terminal's handle; never guess one. The result says which mentions matched an open terminal.\n\nSIGNATURE. Bolt signs the note itself, appending a last line `— from @<your terminal> · <repo> (<branch>)`, found from your cwd and sessionId. Do not write one yourself; an edited note's old signature is replaced.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The note's name, shown on its tile and used as its file name (saved as <name>.md). Short."
+        },
+        "text": {
+          "type": "string",
+          "description": "The note's full markdown content."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your own working directory; Bolt signs the note with your terminal and repo."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Your agent session id, if you know it. Makes finding your terminal exact."
+        }
+      },
+      "required": [
+        "name",
+        "text",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "upsertContainers",
+    "description": "Create or update Containers in Bolt's model of this repo, so the user can see the shape of the system they are working on. Bolt does not draw a file tree or a call graph: it draws an AI-maintained semantic model made of Containers (units of responsibility), Components (typed ontology objects), Ports (a container's semantic boundary) and typed Relationships. Draw when the user asks, or when this repo has no model yet for the area you are working in. Otherwise leave the model standing: reading more code, tracing something or answering a question is not a reason to redraw. A question about a container is a question — answer it and call showInBolt to point at it.\n\nWHAT A CONTAINER IS. An AI-defined cohesive unit of software responsibility: the components an engineer would want to understand, discuss, plan against or change together. A container is NOT required to correspond to a directory, file, class, package, service or deployment boundary, and you must not recreate the repository's directory structure through containers. Ask: which pieces of this software work together to accomplish one recognisable responsibility, and would likely need to be reasoned about together when that responsibility changes?\n\nBOUNDARY SIGNALS, in descending importance. 1. Shared responsibility — they collectively accomplish one recognisable behaviour or outcome. 2. Shared change surface — a feature or a bug would commonly require reasoning about them together. 3. Shared business concept — they operate around the same business concept. 4. Execution relationship — they call, trigger, send to, receive from or otherwise execute together. 5. Shared state — they read or write the same important state. 6. Structural proximity — they sit in the same module or directory. Treat proximity as supporting evidence only, never as the primary reason for clustering.\n\nHIERARCHY. Prefer a shallow hierarchy: Domain, then Container, then an optional sub-container, then Components. Avoid arbitrary nesting. Use a sub-container only when it materially improves understanding — 'Carrier Submission' splitting into 'Standard Carrier Integration' and 'Progressive Integration' because Progressive genuinely behaves differently, not because two folders exist.\n\nPORTS ARE THE BOUNDARY. inputPorts and outputPorts name the meaningful information, events, resources or control entering and leaving the responsibility — 'Quote Request' in, 'Quote Received' and 'Submission Failed' out. Name each port's componentIds: the internals that consume an input or produce an output. Bolt stands each port on the container's own border as a gate — ways in on the north side, ways out on the south — and routes every relationship crossing that border through the gate whose componentIds name the internal it touches. Crossings sharing a gate bundle into one road, so a boundary reads as one visible thing instead of a fan of wires; a crossing no port names goes over the line unremarked. A container with no ports is a black box the user cannot read from the outside, so give every container the ports it actually has.\n\nreasoning IS NOT DECORATION. One sentence on why these components belong together, in terms of the signals above. It is what lets you, or the next session, decide later whether the cluster still holds.\n\nRE-CLUSTERING. Container boundaries are interpretations, not facts. Split, merge, rename or reorganise them as your understanding improves — but because the semantic understanding changed, never because the repository structure changed. Components and their code references survive it: move a component by naming it in the new container's componentIds and Bolt takes it out of the old one and tells you it did.\n\nPLANNING USES THE SAME MODEL. A plan does not create plan nodes. It creates proposed Containers, Components, Ports and Relationships with state 'proposed', beside the discovered ones, and they transition through 'hardened', 'implementing' and 'implemented' as the work lands. Never build a second representation of planned work.\n\nPATCH SEMANTICS. Send only what changes. A field you omit is left alone; a field you send replaces what was there; an empty string clears prose and an empty array clears a list. A container you name by an id that does not exist yet is created, and then it needs a name.\n\nBUDGET. name 2-5 words, and it names the responsibility, not the mechanism: 'Carrier Submission', never 'submitQuote() and friends'. purpose one sentence. description 1-3 sentences. reasoning one sentence. Nothing here reproduces the source.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "containers": {
+          "type": "array",
+          "description": "The containers to create or update. Only the fields you send change.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The container's stable id. Omit it to create one from the name; send a known id to update that container."
+              },
+              "name": {
+                "type": "string",
+                "description": "The responsibility this container owns, 2-5 words. Required when creating."
+              },
+              "purpose": {
+                "type": "string",
+                "description": "One sentence: the one responsibility this container owns."
+              },
+              "description": {
+                "type": "string",
+                "description": "1-3 sentences on what lives here and what it does."
+              },
+              "reasoning": {
+                "type": "string",
+                "description": "One sentence on why these components belong together, in terms of the boundary signals."
+              },
+              "parentId": {
+                "type": "string",
+                "description": "The container this one sits inside, usually a domain. Send an empty string to make it a root."
+              },
+              "componentIds": {
+                "type": "array",
+                "description": "Every component this container holds. Replaces the current membership, and moves a component out of whatever container held it before. A component belongs to exactly one container.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "inputPorts": {
+                "type": "array",
+                "description": "What meaningfully enters this responsibility.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "'Quote Request', 'Eligible Carriers'."
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "discovered",
+                        "proposed",
+                        "hardened",
+                        "implementing",
+                        "implemented",
+                        "uncertain"
+                      ]
+                    },
+                    "componentIds": {
+                      "type": "array",
+                      "description": "The internals that consume this input.",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                }
+              },
+              "outputPorts": {
+                "type": "array",
+                "description": "What meaningfully leaves this responsibility.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "'Quote Received', 'Submission Failed'."
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "discovered",
+                        "proposed",
+                        "hardened",
+                        "implementing",
+                        "implemented",
+                        "uncertain"
+                      ]
+                    },
+                    "componentIds": {
+                      "type": "array",
+                      "description": "The internals that produce this output.",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                }
+              },
+              "state": {
+                "type": "string",
+                "description": "Where this container is in its life: 'discovered' exists in the code, 'proposed' was introduced by a plan, 'hardened' is defined well enough to build, 'implementing' is being built, 'implemented' is backed by real code, 'uncertain' is not yet grounded.",
+                "enum": [
+                  "discovered",
+                  "proposed",
+                  "hardened",
+                  "implementing",
+                  "implemented",
+                  "uncertain"
+                ]
+              }
+            }
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your working directory, absolute. It says which repo's model this is; the model belongs to the repo, not to your session."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Optional. Attributes what you write to a session, for the user's own filtering."
+        }
+      },
+      "required": [
+        "containers",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "upsertComponents",
+    "description": "Create or update Components: the typed ontology objects a container is made of. Every component has a stable ontology type saying WHAT KIND OF SOFTWARE THING it is, and a name saying what it means in this project. Bolt draws the icon from the type and the meaning from the name, so a wrong type is a wrong picture.\n\nDO NOT CREATE A COMPONENT FOR EVERY SYMBOL. A symbol existing is not a reason. Create a component when it helps an engineer understand, plan or change the system. Include low-level detail — a variable, a column, a parameter — only when it materially contributes to understanding the represented behaviour, and prefer making it a child of a larger component rather than a peer: a db_column under its db_table, a function under the service that owns it, via parentId.\n\nSTATE IS THE LIFECYCLE, NOT A SCORE. 'discovered' exists in the current implementation. 'proposed' was introduced by a plan and is not yet defined. 'hardened' is a planned component whose purpose and relationships are sufficiently defined. 'implementing' is being created or changed right now. 'implemented' is backed by actual implementation. 'uncertain' means you could not ground its classification or meaning. Planned work moves through these states; it is never replaced by a second set of nodes.\n\nCODE IS EVIDENCE, NOT STRUCTURE. codeReferences are how an engineer gets from the model to the source. Give the path, and the line when you have one. They are the grounding for the component, not its definition, so a component with no reference is fine when the thing it names is real — an external vendor, a proposed worker.\n\nPATCH SEMANTICS. Send only what changes. A field you omit is left alone; a field you send replaces what was there; an empty array clears a list and an empty string clears prose. Reclassifying is sending {id, type}; moving through the lifecycle is sending {id, state}. A component named by an unknown id is created, and then it needs a name and a type.\n\nTYPE IS FOUR DECISIONS, NOT A LABEL. Bolt draws an accurate type as a recognisable silhouette, a role colour, a zoom level and a neighbourhood on the map -- a database sits in the storage band, a vendor on the outside rim, a rule beside the behaviour it governs. A wrong type puts a thing in the wrong part of the world, not just under the wrong icon. Bolt works the architectural role out from the type plus the relationships: a service that integrates_with a vendor is a gateway and moves to the boundary; a function whose only outgoing relationship is validates is a policy. getOntology returns the role it derived, so read it back if you want to know where something landed, and set metadata.role only when that derivation is wrong.\n\nBUDGET. name is the project-specific meaning — 'submitQuote()', 'carrier_quotes', 'Progressive'. description 1-2 sentences on what it does and the identifier that decides it. Nothing here reproduces the source.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "components": {
+          "type": "array",
+          "description": "The components to create or update. Only the fields you send change.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The component's stable id. Omit it to create one from the name; send a known id to update that component."
+              },
+              "type": {
+                "type": "string",
+                "description": "What kind of software thing this is. Required when creating. This drives the icon.",
+                "enum": [
+                  "domain",
+                  "capability",
+                  "workflow",
+                  "business_entity",
+                  "business_rule",
+                  "service",
+                  "function",
+                  "api_endpoint",
+                  "event",
+                  "queue",
+                  "trigger",
+                  "scheduled_job",
+                  "worker",
+                  "ui_surface",
+                  "database",
+                  "db_table",
+                  "db_column",
+                  "model",
+                  "variable",
+                  "cache",
+                  "file",
+                  "external_vendor",
+                  "external_api",
+                  "config",
+                  "infrastructure",
+                  "human_role"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "description": "What this is in this project. Required when creating."
+              },
+              "description": {
+                "type": "string",
+                "description": "1-2 sentences: what it does, and the identifier that decides what happens next."
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "discovered",
+                  "proposed",
+                  "hardened",
+                  "implementing",
+                  "implemented",
+                  "uncertain"
+                ]
+              },
+              "parentId": {
+                "type": "string",
+                "description": "A larger component this one is part of — a db_column under its db_table. Container membership is separate and lives on the container. Send an empty string to un-nest it."
+              },
+              "codeReferences": {
+                "type": "array",
+                "description": "Where this is in the source: the evidence for the component. 'src/quote.ts:42' or {path, line, symbol}.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "line": {
+                      "type": "number"
+                    },
+                    "symbol": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "description": "Anything else worth keeping that is not prose — a cron expression, a queue name, a table's row count. Never drawn on the card. One key is read: `role` places the component on the map, one of outside|edge|surface|compute|policy|data|automation|concept. Bolt derives the role from the type and the relationships, so set this only when that derivation would put the thing in the wrong neighbourhood — a service that is really a gateway, a function that is really a policy. Anything else in `role` is ignored."
+              },
+              "spatialRole": {
+                "type": "string",
+                "description": "OMIT THIS ALMOST ALWAYS. Bolt derives every site's anchor itself, deterministically, and the derived answer is the one to prefer. Send this only to correct a semantically wrong centre — the client with the most edges winning over the vendor the whole site exists to integrate with. 'anchor' nominates this as the centre of its site; 'satellite' says it explains something else and must not be a centre; 'either' is the default and is the same as omitting it. This nominates MEANING ONLY: which satellites orbit an anchor, which hex a site takes, where anything stands and how it is drawn are Bolt's, not yours.",
+                "enum": [
+                  "anchor",
+                  "satellite",
+                  "either"
+                ]
+              },
+              "anchorReason": {
+                "type": "string",
+                "description": "One sentence saying why this is the conceptual centre, in the project's own terms — 'the client, webhook, auth and pull operations all exist to integrate with Canopy Connect'. Shown to the user as the reason the site is arranged this way, so it is only worth sending alongside spatialRole 'anchor'."
+              },
+              "layer": {
+                "type": "string",
+                "description": "WHOSE RESPONSIBILITY THIS IS, which decides how far from the middle of the map it settles. 'core' is behaviour the application exists for — capabilities, workflows, entities, rules. 'inner' is what implements them — services, functions, workers, jobs, events, models, persistence. 'boundary' is where the system is reached: routes, webhooks, UI entry surfaces, import/export edges, and the adapters and clients that talk to somebody else's system. 'external' is outside our control — vendors, third-party and carrier systems, SaaS, external databases; anything marked external is drawn beyond the application's border and never inside it, whatever container names it. Bolt derives this from the type and the evidence, so send it only where the type misleads: an integration adapter is a function by type and a boundary by responsibility. It never says where the thing goes — position is derived from it.",
+                "enum": [
+                  "core",
+                  "inner",
+                  "boundary",
+                  "external"
+                ]
+              }
+            }
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your working directory, absolute. It says which repo's model this is."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Optional. Attributes what you write to a session."
+        }
+      },
+      "required": [
+        "components",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "setRelationships",
+    "description": "Create or update typed Relationships: the meaningful interaction between components and containers. A relationship says how the represented responsibility actually works, so prefer the ones that explain that. RELATIONSHIPS PLACE THINGS. integrates_with, calls, sends and consumes are how Bolt decides something is a gateway; validates is how it decides something is a policy; routes_to, produces, sends, triggers, calls, consumes and schedules are what order one responsibility after another across the map. An edge drawn for completeness rather than because it explains the behaviour will move a component into the wrong neighbourhood. Do not attempt to record every possible relationship — a graph asserting everything shows nothing.\n\nWHAT TO DRAW. Flow should communicate how responsibilities interact, not which function calls which function. At the top level that is 'Quote Intake' to 'Carrier Eligibility' to 'Carrier Submission'. Inside a container it is the components that make the responsibility work.\n\ncontains IS HIERARCHY. Sending type 'contains' does not create an edge: a container containing a component sets that container's membership, a container containing a container nests it, and a component containing a component nests it. Hierarchy is stored once, and Bolt draws it as nesting rather than as a line. Reading the model gives those contains rows back, and removeRelationships on one cuts the link.\n\nSTATE. A relationship has the same lifecycle as everything else: a planned interaction is 'proposed' and hardens with the plan. A proposed relationship is drawn soft.\n\nSending a relationship that already exists updates it. Both ends must exist first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "relationships": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "description": "The component or container the interaction starts from."
+              },
+              "target": {
+                "type": "string",
+                "description": "The component or container it acts on."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "contains",
+                  "implements",
+                  "calls",
+                  "reads",
+                  "writes",
+                  "sends",
+                  "receives",
+                  "triggers",
+                  "schedules",
+                  "depends_on",
+                  "validates",
+                  "transforms",
+                  "routes_to",
+                  "stores",
+                  "represents",
+                  "integrates_with",
+                  "produces",
+                  "consumes"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "discovered",
+                  "proposed",
+                  "hardened",
+                  "implementing",
+                  "implemented",
+                  "uncertain"
+                ]
+              },
+              "description": {
+                "type": "string",
+                "description": "Optional: the condition or payload that makes this interaction what it is."
+              }
+            },
+            "required": [
+              "source",
+              "target",
+              "type"
+            ]
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your working directory, absolute. It says which repo's model this is."
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "relationships",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "removeContainers",
+    "description": "Remove containers. By default their components are released and become unassigned, which is what a merge or a re-cluster wants; pass withComponents to delete the components too, which is right only when the responsibility itself is gone from the code. A nested container rises to its grandparent rather than being stranded.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "withComponents": {
+          "type": "boolean",
+          "description": "Delete the components this container held, and anything nested under them. Off by default."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your working directory, absolute."
+        }
+      },
+      "required": [
+        "ids",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "removeComponents",
+    "description": "Remove components that are no longer part of the system. Their relationships go with them, they leave the container and the ports that named them, and anything nested under them rises to their parent. Removing a component because you reclassified it is wrong — send upsertComponents with the new type and keep its history and its code references.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your working directory, absolute."
+        }
+      },
+      "required": [
+        "ids",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "removeRelationships",
+    "description": "Remove relationships by naming the same source, target and type you created them with. A 'contains' triple cuts the hierarchy link it stands for: the component leaves the container, or the child is un-nested.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "relationships": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "target",
+              "type"
+            ]
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your working directory, absolute."
+        }
+      },
+      "required": [
+        "relationships",
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "getOntology",
+    "description": "Read this repo's model back: its containers with their ports and membership, its components with their types, states and code references, and its relationships. Read before you write when you did not build the current model yourself — it is how you find the ids to update rather than creating a second component for something already there. Hierarchy comes back both as parentId and componentIds and as the 'contains' rows they stand for.\n\nSITES come back too, and they are the middle level of the model: a container says which area of the system you are in, a site says what one particular place is about. Each site names its anchor and the satellites arranged around it, and every component carries the site it belongs to, whether it is the anchor or a satellite, the reason it is there, and whether that was derived, nominated by an analysis or placed by the user. That is what to answer 'why is this object in this site?' from. A component with notOnMap set is in the model and not on the map, and the field says why.\n\nFLOW COMPLETENESS. Every component comes back with a flow reading: how many execution, event and data-flow relationships run into it, how many run out, and whether it stands as connected, an entry, an outcome or isolated. flowGaps lists every component the model cannot yet explain the running of, each with the question it leaves open. THESE ARE RELATIONSHIPS THE GRAPH IS MISSING, NOT A RENDERING PROBLEM: if the code shows CanopyWebhookHandler handling canopy_pull_event, then setRelationships must carry canopy_pull_event triggers CanopyWebhookHandler, and until it does the map cannot show why the handler runs. Close every gap by adding the relationship the code shows; where a component genuinely begins a flow (a request, a clock, a click, an external webhook) or genuinely ends one (a table, a cache, an outside system), its type already says so and no gap is reported. Where you could not establish the relationship at all, set state 'uncertain' rather than leaving it floating. A cleaner picture is never worth a journey that cannot be followed from beginning to end.\n\nEach component also comes back with the layer it was placed in — core, inner, boundary or external — and whether that was authored or derived. That is the architectural gravity the map is arranged by: the centre is the behaviour the application exists for, and the edge is where our responsibility ends.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "rootId": {
+          "type": "string",
+          "description": "Only this container or component and what is under it."
+        },
+        "depth": {
+          "type": "number",
+          "description": "How many levels below rootId to include. Omit for all of them."
+        },
+        "types": {
+          "type": "array",
+          "description": "Only components of these ontology types.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "states": {
+          "type": "array",
+          "description": "Only objects in these lifecycle states — 'proposed' to read back a plan.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeRelationships": {
+          "type": "boolean",
+          "description": "Include relationships. On by default."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your working directory, absolute."
+        }
+      },
+      "required": [
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "getSelection",
+    "description": "What the user has selected in Bolt's graph, which container they have opened, and whether they are looking at this repo at all. Call it when the user says 'this one' or 'these', or before answering a question about something they are pointing at.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string",
+          "description": "Your working directory, absolute."
+        }
+      },
+      "required": [
+        "cwd"
+      ]
+    }
+  },
+  {
+    "name": "showInBolt",
+    "description": "Point the user at part of the model. Select the things you are talking about, expand the container whose insides you are describing, highlight a set with a note, or filter the canvas. This is the answer to a question about a node — not a redraw. Expanding a container opens the chain above it too, so the user actually sees it. Send an empty array to take a pointer back down.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "select": {
+          "type": "array",
+          "description": "Container or component ids to select, as if the user had clicked them.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expand": {
+          "type": "array",
+          "description": "Container ids to open, revealing what is inside them.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "collapse": {
+          "type": "array",
+          "description": "Container ids to close again.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "highlight": {
+          "type": "array",
+          "description": "Ids to ring on the canvas without changing the selection.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "type": "string",
+          "description": "One line shown beside the highlight, saying what the user is looking at."
+        },
+        "filter": {
+          "type": "string",
+          "description": "Put text in the search box, dimming everything it does not match."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Your working directory, absolute."
+        }
+      },
+      "required": [
+        "cwd"
+      ]
+    }
+  }
+]

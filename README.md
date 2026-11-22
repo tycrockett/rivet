@@ -41,7 +41,7 @@ same way; the hub thread is saved as `hub-thread.json` (last 300 entries) beside
 | `src/collapse.rs` | `searchStore`'s collapse atoms and the ⌘0 cycle (`togglePinnedCollapsedAtom`), with `pinnedCycle.check.ts` as tests; saved as `workspace-collapse.json`, seeded from the Electron Bolt's |
 | `src/hints.rs` | `HintOverlay` + `hintLabels` (⌘⏎): labels for what views register as clickable (rows, chips, headings, column tabs, +, ×, columns, views, the Changes list), the same prefixes and ordinals, typed to click; `hintLabels.check.ts` as tests |
 | `src/terminals.rs` | `EditorPanel` + `EditorGroup` + `PaneOverlay`: one resizable column per editor group, each with its tabs (terminals and files), the shown one and a terminal's notes strip, Bolt's 12px gap between frames; the active-column bar (blue, at most 250 wide, centered under the active column, sliding between columns, shown while the focus is in a column); xterm's look (theme colors, 12px JetBrains Mono else Menlo, block cursor, 8px inset). Only the shown tab is mounted; one emulator per terminal outlives its views, so screen and scrollback survive switching and moving columns |
-| `src/viewer.rs` | Bolt's file and diff tabs, for notes and `keybindings.json`: nsh-base's `Editor` or its `DiffView` against `HEAD` (split or unified), switched in the tab's header; saved 400 ms after typing stops and when the tab closes |
+| `src/viewer.rs` | Bolt's file and diff tabs, for notes, `keybindings.json` and files agents open (`openFile`, with its selection): nsh-base's `Editor` or its `DiffView` against `HEAD` (split or unified), switched in the tab's header; saved 400 ms after typing stops and when the tab closes. `openDiff`'s tabs show a file against proposed text and write nothing |
 | `src/settings_tab.rs` | `SettingsTab` (`settings`): Open in New Column (new terminals, files, Changes and Settings tabs go in a column of their own), and Keybindings, which opens `keybindings.json` for editing |
 | `src/keybindings.rs` | `keybindings.ts`: `keybindings.json` (this app's, else the Electron Bolt's) merged with the defaults, read at launch; `when` clauses are ignored, and only commands this shell has bind |
 | `src/changes.rs` | `ChangesTab` + `changesStore`: `diff`'s tab, the changed files (staged and unstaged in the working tree, or a commit's, or a range's) beside the selected file's diff; the header picks a commit |
@@ -51,6 +51,8 @@ same way; the hub thread is saved as `hub-thread.json` (last 300 entries) beside
 | `src/hub/engine/` | `boltCommands/types.ts`, `boltCommandStore`, `fleetStore`'s hops and posts, `terminalSendStore`, `pty:status` |
 | `src/hub/palette/` | `BoltPalette`, `HubCards`, `ScriptEditor`, and `SwitchResults`' cards: git steps with their icon and detail, `status` (lines changed, ahead/behind, unpushed, each kind of change with its files to open), branches (default, worktree, last commit, remote; click to switch), conflicts with their files, bookmarks, diffs in color |
 | `src/commands/rich.rs` | what a result card draws beyond its text (Bolt's result `type`s), which commands set beside the text they print |
+| `src/mcp/` | `mcpServer.js`'s streamable HTTP transport and `useMcpBridge.ts`'s tools: the `bolt` MCP server at `http://127.0.0.1:41777/mcp` (the URL omp's and claude's configs name), retried every 5 s while another app holds the port; a request whose `Origin` is not this machine is refused. Bolt's schemas verbatim (`tools.json`); workspace tabs, `runCommand`, `createWorktrees`, `setTabGroup`, `closeTabs`, `sendToTerminals`, `startAgents`, file and diff tabs, and `saveNote` work; selection, diagnostics, web tabs, the model canvas, graphs, boards, `readTerminals` and `startGroupSession` answer that Rivet does not support them |
+| `src/group_memory.rs` | `groupSessionStore`'s prompts: each group home's and member tab's `.omp/APPEND_SYSTEM.md`, kept current as groups and membership change, so omp sessions keep saving the group's memories in Bolt's `group-sessions` folder |
 
 ## Keys
 
@@ -92,12 +94,13 @@ list, and the working tree is polled every 2 s rather than watched;
 
 The palette's result cards are drawn with characters for Bolt's Phosphor icons and without its flash and shake
 animations; the todo, notes, settings and orphan-terminal views are not here. `@bolt` and headless hops run your
-`claude` without Bolt's MCP config, so `@bolt` chat needs a running
-Electron Bolt serving MCP. A terminal's output is read from its screen (no `pty:tail`), and its status comes from the
-process table and its last output time.
+`claude` with no `--mcp-config`, so they reach this app's server only where your own claude config names
+`http://127.0.0.1:41777/mcp`. A terminal's output is read from its screen (no `pty:tail`), and its status comes from
+the process table and its last output time.
 
 Terminals do not reflow: NSH's emulator cuts lines when a column narrows (xterm.js re-wraps them), so text cut by a
 narrow column stays cut after it widens again.
 
 The PTY daemon is unix-only, keeps no 64-session cap and captures no zsh `lastCommand` label. The IDE environment
-(`CLAUDE_CODE_SSE_PORT`, the `BROWSER` shim) is not set.
+(`CLAUDE_CODE_SSE_PORT`, the `BROWSER` shim), Bolt's WebSocket IDE server and its lock file are not set up, so the
+Claude CLI's IDE integration and omp's selection extension see no IDE.

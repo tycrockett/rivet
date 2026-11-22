@@ -177,7 +177,11 @@ impl TabItem {
         match self {
             TabItem::Term(t) if t.title.trim().is_empty() => format!("shell {}", t.id),
             TabItem::Term(t) => t.title.clone(),
-            TabItem::Doc(d) => Path::new(&d.path).file_name().map_or_else(|| d.path.clone(), |n| n.to_string_lossy().into_owned()),
+            // Bolt's diff tab label (`Diff: <file name>`).
+            TabItem::Doc(d) => {
+                let name = Path::new(&d.path).file_name().map_or_else(|| d.path.clone(), |n| n.to_string_lossy().into_owned());
+                if d.proposal.is_some() { format!("Diff: {name}") } else { name }
+            }
             TabItem::Changes(_) => "Changes".into(),
             TabItem::Settings(_) => "Settings".into(),
         }
