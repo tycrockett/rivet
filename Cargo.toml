@@ -1,0 +1,37 @@
+[package]
+name = "rivet"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+nsh-core = "0.6.1"
+nsh-base = "0.6.1"
+env_logger = "0.11"
+portable-pty = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+dirs = "6"
+libc = "0.2"
+tokio = { version = "1", features = ["sync"] }
+
+# `cargo run` builds NSH's layout, text and renderer with the app; unoptimized
+# they make every frame slow (a palette's rows appear late, a column drag
+# lags). Dependencies build optimized, and without debug assertions: with
+# them `objc2` looks up and checks the signature of every AppKit message,
+# which the mounter sends for every view every frame. The app's own code
+# stays debuggable.
+[profile.dev.package."*"]
+opt-level = 3
+debug-assertions = false
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-platform-linux = { version = "0.6.1", default-features = false, features = ["shader", "editor", "emoji-picker", "highlight", "math", "plot", "rich-editor", "term", "websocket", "updater", "svg", "net", "sound"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-platform-macos = { version = "0.6.1", default-features = false, features = ["shader", "editor", "emoji-picker", "highlight", "math", "plot", "rich-editor", "term", "websocket", "updater", "svg"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+nsh-platform-windows = { version = "0.6.1", default-features = false, features = ["shader", "editor", "emoji-picker", "highlight", "math", "plot", "rich-editor", "term", "websocket", "updater", "svg", "net"] }
