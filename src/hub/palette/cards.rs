@@ -568,11 +568,10 @@ fn conflict(shell: Shell, title: &str, files: &[String], directory: &str, hint: 
 fn git_status(shell: Shell, s: &GitStatus) -> View {
     let dir = shell.directory();
     let mut col = view().gap_1();
-    if let Some(loc) = s.loc.filter(|l| l.committed != (0, 0) || l.uncommitted != (0, 0)) {
-        // Since the default branch when there is any, else uncommitted; both
+    if let Some(loc) = s.loc.as_ref().filter(|l| !l.is_empty()) {
+        // Since the branch's base when there is any, else uncommitted; both
         // shown when both are.
-        let both = loc.committed != (0, 0) && loc.uncommitted != (0, 0);
-        let main = if loc.committed != (0, 0) { loc.committed } else { loc.uncommitted };
+        let (main, both) = loc.lead();
         let num = |t: String, c: Rgba| text(t).font_family("ui-monospace").text_size(px(12.0)).tabular_nums().text_color(c);
         let mut row = view().flex_row().items_center().gap_1().mb_1().child(num(format!("+{}", main.0), success()));
         if both {

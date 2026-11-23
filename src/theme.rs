@@ -80,8 +80,10 @@ pub struct Vars {
     pub border: u32,
     pub fg: u32,
     pub fg_muted: u32,
+    pub fg_faint: u32,
     pub accent: u32,
     pub info: u32,
+    pub success: u32,
     pub error: u32,
 }
 
@@ -194,6 +196,7 @@ fn build(theme: &MonacoTheme) -> BoltTheme {
     // applyThemeCssVars
     let bg = color("editor.background").unwrap_or(0x0c0c0f);
     let accent = color("editorCursor.foreground").unwrap_or(0x00ffff);
+    let added = color("editorGutter.addedBackground");
     let deleted = color("editorGutter.deletedBackground").unwrap_or(0xef4444);
     let modified = color("editorGutter.modifiedBackground").unwrap_or(0x3b82f6);
     let vars = Vars {
@@ -204,8 +207,10 @@ fn build(theme: &MonacoTheme) -> BoltTheme {
         border: color("editorWidget.border").unwrap_or_else(|| lighten(bg, 0.15)),
         fg: color("editor.foreground").unwrap_or(0xe4e4e7),
         fg_muted: lighten(bg, 0.45),
+        fg_faint: lighten(bg, 0.3),
         accent,
         info: color("editorInfo.foreground").unwrap_or(modified),
+        success: added.unwrap_or_else(|| token(&["string"], 0x16a34a)),
         error: color("editorError.foreground").unwrap_or(deleted),
     };
     BoltTheme { xterm, vars }

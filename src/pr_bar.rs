@@ -41,6 +41,11 @@ fn red() -> u32 {
 #[derive(Clone, Copy)]
 pub struct PrBar {
     shell: Shell,
+    /// `provide`'s owner, for the merge and the timers: a press listener's
+    /// own is the run of the region that drew its button, which the press
+    /// itself ends (`armed`, `merging` draw the button again), cancelling
+    /// what it spawned.
+    owner: Owner,
     /// Each workspace's PR as last fetched, with the branch it was asked for.
     cache: Signal<HashMap<String, (String, Option<Detail>)>>,
     /// A PR merged from here: the next fetch finds no open PR, so it shows
@@ -72,6 +77,7 @@ pub fn provide(shell: Shell) -> PrBar {
     });
     let bar = PrBar {
         shell,
+        owner: Owner::current(),
         cache,
         merged,
         shown,
@@ -116,10 +122,10 @@ impl PrBar {
         // An ask already out for a workspace swallows the next ones: the
         // git state is read again in bursts.
         let asking: Rc<RefCell<HashSet<String>>> = Rc::default();
-        // The poller's owner, not the asking effect's: the effect runs again
+        // The bar's owner, not the asking effect's: the effect runs again
         // on every git state read, which would cancel a fetch in flight and
         // leave its workspace in `asking` for good.
-        let owner = Owner::current();
+        let owner = self.owner;
         let ask = Rc::new(move |dir: String, branch: String| {
             if !asking.borrow_mut().insert(dir.clone()) {
                 return;
@@ -177,10 +183,12 @@ impl PrBar {
             let tick = self.arm_tick.get_untracked() + 1;
             self.arm_tick.set(tick);
             self.armed.set(true);
-            set_timeout(ARM, move || {
-                if self.arm_tick.get_untracked() == tick {
-                    self.armed.set(false);
-                }
+            self.owner.run(|| {
+                set_timeout(ARM, move || {
+                    if self.arm_tick.get_untracked() == tick {
+                        self.armed.set(false);
+                    }
+                })
             });
             return;
         }
@@ -190,24 +198,26 @@ impl PrBar {
         self.error.set(String::new());
         let dir = self.shell.directory();
         let detail = detail.clone();
-        spawn(async move {
-            let at = dir.clone();
-            let result = git::off_thread(move || prs::merge(&at, admin)).await;
-            self.merging.set(false);
-            match result {
-                Ok(()) => {
-                    self.merged.set(Some((dir.clone(), detail)));
-                    self.shell.refresh_status(dir);
+        self.owner.run(|| {
+            spawn(async move {
+                let at = dir.clone();
+                let result = git::off_thread(move || prs::merge(&at, admin)).await;
+                self.merging.set(false);
+                match result {
+                    Ok(()) => {
+                        self.merged.set(Some((dir.clone(), detail)));
+                        self.shell.refresh_status(dir);
+                    }
+                    Err(e) => self.error.set(e),
                 }
-                Err(e) => self.error.set(e),
-            }
+            })
         });
     }
 
     fn copy_link(self, url: String) {
         set_clipboard(url);
         self.copied.set(true);
-        set_timeout(Duration::from_millis(1500), move || self.copied.set(false));
+        self.owner.run(|| set_timeout(Duration::from_millis(1500), move || self.copied.set(false)));
     }
 }
 
@@ -338,7 +348,8 @@ fn button(label: &str, primary: bool, enabled: bool, on_press: impl Fn() + 'stat
         .child(mono(label.to_owned(), if primary { v.bg } else { v.fg_muted }))
 }
 
-fn tip(s: &str) -> AnyElement {
+/// A tooltip in Bolt's widget look.
+pub fn tip(s: &str) -> AnyElement {
     let v = &BOLT_THEME.vars;
     view()
         .px_2()

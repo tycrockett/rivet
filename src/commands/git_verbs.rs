@@ -412,28 +412,12 @@ async fn pull_with_stats(ctx: &Ctx, dir: &str, from: &str) -> git::Result<Option
     Ok(Some(shortstat_summary(&stat)))
 }
 
-/// `(insertions, deletions)` of a `--shortstat` line; zero for what it
-/// doesn't name (`parseShortstat`).
-fn shortstat_counts(stat: &str) -> (u32, u32) {
-    let count = |word: &str| {
-        stat.split(',')
-            .filter_map(|part| {
-                let mut tokens = part.split_whitespace();
-                let n = tokens.next()?.parse().ok()?;
-                tokens.next()?.starts_with(word).then_some(n)
-            })
-            .next()
-            .unwrap_or(0)
-    };
-    (count("insertion"), count("deletion"))
-}
-
 /// `+adds −dels` of a `--shortstat` line; empty when there is none.
 fn shortstat_summary(stat: &str) -> String {
     if stat.is_empty() {
         return String::new();
     }
-    let (adds, dels) = shortstat_counts(stat);
+    let (adds, dels) = git::shortstat_counts(stat);
     format!("+{adds} −{dels}")
 }
 
@@ -949,7 +933,7 @@ pub async fn status(ctx: &Ctx) -> Result {
         info.branch_stats = branch_diff_stats(dir).await?;
     }
     let card_dir = dir.to_owned();
-    let loc = git::off_thread(move || loc_stats(&card_dir)).await;
+    let loc = git::off_thread(move || git::loc_stats(&card_dir)).await;
     ctx.add_rich("gitStatus", render_status(&info), rich::Rich::Status(info.card(loc)));
     Ok(())
 }
@@ -1002,62 +986,6 @@ async fn branch_diff_stats(dir: &str) -> git::Result<String> {
     Ok(if stat.is_empty() { "0 files changed".into() } else { stat.to_owned() })
 }
 
-/// `useGitStatus`' `locStats`: lines added and removed since the branch's
-/// base (nothing on the default branch itself) and in the working tree,
-/// where untracked files count each of their lines as added. Whatever git
-/// can't say counts as zero.
-fn loc_stats(dir: &str) -> rich::Loc {
-    let counts = |args: &[&str]| git::git(args, dir).map_or((0, 0), |stat| shortstat_counts(&stat));
-    let default = git::default_branch(dir);
-    let committed = match git::current_branch(dir) {
-        Ok(current) if current != default => {
-            let base = find_base_branch(dir, &default);
-            counts(&["diff", "--shortstat", &format!("{base}...HEAD")])
-        }
-        _ => (0, 0),
-    };
-    let (tracked_adds, dels) = counts(&["diff", "--shortstat", "HEAD"]);
-    rich::Loc { committed, uncommitted: (tracked_adds + untracked_lines(dir), dels) }
-}
-
-/// The local branch nearest above HEAD (fewest commits since their
-/// merge-base), the default one winning ties; a branch at or ahead of HEAD
-/// can't be its parent. The default branch when it isn't among them, since
-/// it then already contains HEAD (`findBaseBranch`).
-fn find_base_branch(dir: &str, default: &str) -> String {
-    let Ok(head) = git::git(&["rev-parse", "HEAD"], dir) else { return default.to_owned() };
-    let head = head.trim();
-    let Ok(refs) = git::git(&["for-each-ref", "--format=%(refname:short)", "refs/heads"], dir) else {
-        return default.to_owned();
-    };
-    let (mut best, mut best_count, mut saw_default) = (default, u32::MAX, false);
-    for name in refs.lines().map(str::trim).filter(|n| !n.is_empty()) {
-        let Ok(base) = git::git(&["merge-base", name, "HEAD"], dir) else { continue };
-        let base = base.trim();
-        if base == head {
-            continue;
-        }
-        let Ok(count) = git::git(&["rev-list", "--count", &format!("{base}..HEAD")], dir) else { continue };
-        let Ok(count) = count.trim().parse::<u32>() else { continue };
-        saw_default |= name == default;
-        if count < best_count || (count == best_count && name == default) {
-            (best, best_count) = (name, count);
-        }
-    }
-    (if saw_default { best } else { default }).to_owned()
-}
-
-/// Lines in the files git doesn't track or ignore (`wc -l`: newlines).
-fn untracked_lines(dir: &str) -> u32 {
-    let Ok(files) = git::git(&["ls-files", "-z", "--others", "--exclude-standard"], dir) else { return 0 };
-    files
-        .split('\0')
-        .filter(|f| !f.is_empty())
-        .filter_map(|f| std::fs::read(Path::new(dir).join(f)).ok())
-        .map(|bytes| bytes.iter().filter(|b| **b == b'\n').count() as u32)
-        .sum()
-}
-
 #[derive(Debug, Default, PartialEq)]
 struct StatusInfo {
     modified: Vec<String>,
@@ -1073,7 +1001,7 @@ struct StatusInfo {
 impl StatusInfo {
     /// The status card's data; `branch_stats` is only there when asked for
     /// (`status --all`).
-    fn card(self, loc: rich::Loc) -> rich::GitStatus {
+    fn card(self, loc: git::Loc) -> rich::GitStatus {
         rich::GitStatus {
             modified: self.modified,
             added: self.added,
@@ -1187,9 +1115,9 @@ mod tests {
         assert_eq!(shortstat_summary(" 2 files changed, 10 insertions(+), 3 deletions(-)"), "+10 −3");
         assert_eq!(shortstat_summary(" 1 file changed, 1 deletion(-)"), "+0 −1");
         assert_eq!(shortstat_summary(""), "");
-        assert_eq!(shortstat_counts(" 2 files changed, 10 insertions(+), 3 deletions(-)"), (10, 3));
-        assert_eq!(shortstat_counts(" 1 file changed, 1 insertion(+)"), (1, 0));
-        assert_eq!(shortstat_counts(""), (0, 0));
+        assert_eq!(git::shortstat_counts(" 2 files changed, 10 insertions(+), 3 deletions(-)"), (10, 3));
+        assert_eq!(git::shortstat_counts(" 1 file changed, 1 insertion(+)"), (1, 0));
+        assert_eq!(git::shortstat_counts(""), (0, 0));
     }
 
     #[test]

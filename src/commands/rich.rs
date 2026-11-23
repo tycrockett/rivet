@@ -59,15 +59,7 @@ pub struct GitStatus {
     pub unpushed: Vec<Commit>,
     /// Lines added and removed (`locStats`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub loc: Option<Loc>,
-}
-
-/// `locStats`: `(added, deleted)` since the default branch, and not yet
-/// committed.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-pub struct Loc {
-    pub committed: (u32, u32),
-    pub uncommitted: (u32, u32),
+    pub loc: Option<crate::git::Loc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

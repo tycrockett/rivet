@@ -226,7 +226,7 @@ fn sides(dir: &str, mode: &Mode, file: &ChangedFile) -> (String, String) {
 /// The working tree's state, cheaply: `git status`, and the size and
 /// modification time of each file it lists, so an edit to an already
 /// changed file counts too. When it changes, the tab loads again.
-fn fingerprint(dir: &str) -> String {
+pub fn fingerprint(dir: &str) -> String {
     let status = git::git(&["status", "--porcelain"], dir).unwrap_or_default();
     let mut print = status.clone();
     for file in parse_porcelain(&status) {

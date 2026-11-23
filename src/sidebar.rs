@@ -9,7 +9,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use nsh_base::theme;
@@ -20,6 +20,7 @@ use nsh_core::{
 };
 
 use crate::{
+    changes,
     collapse::{Collapse, Step},
     commands,
     drag::{self, Item},
@@ -1111,9 +1112,14 @@ fn chip_label(title: &str, label: &str) -> String {
     parts.join(" · ")
 }
 
-/// The strip's foot: the current directory's `branch · repo`.
+/// The strip's foot: the current directory's `branch · repo`, and at its
+/// right the lines its branch changed ([`loc_badge`]).
 fn footer(shell: Shell) -> impl IntoElement {
+    let counts = loc_counts(shell);
     view()
+        .flex_row()
+        .items_center()
+        .gap_2()
         .px_3()
         .py_2()
         .child(
@@ -1124,10 +1130,119 @@ fn footer(shell: Shell) -> impl IntoElement {
                     None => dir,
                 }
             })
+            .flex_1()
             .text_xs()
             .number_of_lines(1)
             .text_color(move || theme().muted_foreground),
         )
+        .child({
+            // `Some(None)` while the directory's first count runs; a memo, so
+            // the spinner isn't made again on every status read.
+            let shown = computed(move || {
+                let dir = shell.directory();
+                shell.statuses.with(|m| m.contains_key(&dir)).then(|| {
+                    counts.with(|c| c.as_ref().filter(|(d, _)| *d == dir).map(|(_, loc)| loc.clone()))
+                })
+            });
+            dynamic(move || shown.get().and_then(loc_badge))
+        })
+}
+
+/// How often the footer looks for a new directory or branch to count, and
+/// how often it looks at the working tree and HEAD (as the Changes tab
+/// does).
+const LOC_TICK: Duration = Duration::from_millis(250);
+const LOC_POLL: Duration = Duration::from_secs(2);
+
+/// The current directory's line counts (`useGitStatus`' `locStats`), with
+/// the directory they were counted for. Counted again when the directory
+/// or its branch changes, and when its working tree or HEAD does (Bolt
+/// watches the directory; this looks every [`LOC_POLL`]). A directory that
+/// isn't a repo is never counted. The counts of the directory left stay
+/// until the new one's land, which the footer shows as counting.
+fn loc_counts(shell: Shell) -> Signal<Option<(String, git::Loc)>> {
+    let counts = signal(None::<(String, git::Loc)>);
+    let task = spawn(async move {
+        // The directory, its branch and what its tree and HEAD looked like
+        // at the last count.
+        let mut seen: Option<(String, String, String)> = None;
+        let mut looked: Option<Instant> = None;
+        loop {
+            let dir = shell.directory_untracked();
+            if let Some(branch) = shell.statuses.with_untracked(|m| m.get(&dir).map(|s| s.branch.clone())) {
+                let moved = seen.as_ref().is_none_or(|(d, b, _)| *d != dir || *b != branch);
+                if moved || looked.is_none_or(|t| t.elapsed() >= LOC_POLL) {
+                    looked = Some(Instant::now());
+                    let at = dir.clone();
+                    let print = git::off_thread(move || {
+                        let head = git::git(&["rev-parse", "HEAD"], &at).unwrap_or_default();
+                        changes::fingerprint(&at) + &head
+                    })
+                    .await;
+                    let now = Some((dir.clone(), branch, print));
+                    if now != seen {
+                        seen = now;
+                        let at = dir.clone();
+                        let loc = git::off_thread(move || git::loc_stats(&at)).await;
+                        counts.set(Some((dir, loc)));
+                    }
+                }
+            }
+            timer(LOC_TICK).await;
+        }
+    });
+    cleanup(move || task.cancel());
+    counts
+}
+
+/// `SidebarFooter`'s line count: `+added / -deleted` since the branch's
+/// base, the uncommitted in parentheses after each when there are both,
+/// else only the uncommitted; nothing when no line changed, a spinner
+/// (`None`) while counting.
+fn loc_badge(loc: Option<git::Loc>) -> Option<AnyElement> {
+    let v = &crate::theme::BOLT_THEME.vars;
+    let Some(loc) = loc else {
+        return Some(spinner(v.fg_faint, v.fg_muted).tooltip(crate::pr_bar::tip("Counting changed lines…")).into_element());
+    };
+    if loc.is_empty() {
+        return None;
+    }
+    let ((main_add, main_del), both) = loc.lead();
+    let (c, u) = (loc.committed, loc.uncommitted);
+    let base = loc.base.as_deref().unwrap_or_default();
+    let tip = match (both, c != (0, 0)) {
+        (true, _) => format!("Since {base}: +{} / -{} · Uncommitted: +{} / -{}", c.0, c.1, u.0, u.1),
+        (false, true) => format!("+{} / -{} since {base}", c.0, c.1),
+        (false, false) => format!("Uncommitted: +{} / -{}", u.0, u.1),
+    };
+    let num = |t: String, c: u32| text(t).font_family("ui-monospace").text_size(px(12.0)).tabular_nums().text_color(rgb(c));
+    let mut row = view().flex_row().items_center().gap_1().flex_shrink(0.0).child(num(format!("+{main_add}"), v.success));
+    if both {
+        row = row.child(num(format!("(+{})", u.0), v.fg_faint));
+    }
+    row = row.child(num("/".into(), v.fg_faint)).child(num(format!("-{main_del}"), v.error));
+    if both {
+        row = row.child(num(format!("(-{})", u.1), v.fg_faint));
+    }
+    Some(row.tooltip(crate::pr_bar::tip(&tip)).into_element())
+}
+
+/// `SpinnerIcon` with `animate-spin`: a ring, one quarter bright, turning
+/// once a second until it goes.
+fn spinner(ring: u32, quarter: u32) -> View {
+    let angle = animated_value(0.0);
+    let spin = Animation::timing(&angle, 360.0, Timing::new(1000.0, Easing::Linear)).looped(None);
+    let _ = spin.start();
+    cleanup(move || spin.stop());
+    view()
+        .w(px(12.0))
+        .h(px(12.0))
+        .flex_shrink(0.0)
+        .rounded_full()
+        .border_2()
+        .border_color(rgb(ring))
+        .border_t_color(rgb(quarter))
+        .bind_rotate(&angle)
 }
 
 fn parse_hex(s: &str) -> Option<Rgba> {

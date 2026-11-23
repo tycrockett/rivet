@@ -3,9 +3,10 @@
 //! [`off_thread`]). Failures carry Bolt's message: stderr, else
 //! `Exited with code N`.
 
-use std::{path::Path, process::Command};
+use std::{path::Path, process::Command, sync::Mutex};
 
 use nsh_core::prelude::blocking;
+use serde::{Deserialize, Serialize};
 
 pub type Result<T, E = String> = std::result::Result<T, E>;
 
@@ -250,6 +251,117 @@ pub fn commit_with_message(cwd: &str, message: &str, extra: &[&str]) -> Result<S
 /// `'…'` for a shell (`shellQuote`).
 pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// `locStats`: `(added, deleted)` since the branch's base, and not yet
+/// committed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Loc {
+    pub committed: (u32, u32),
+    pub uncommitted: (u32, u32),
+    /// The branch `committed` counts from; none on the default branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+}
+
+impl Loc {
+    pub fn is_empty(&self) -> bool {
+        self.committed == (0, 0) && self.uncommitted == (0, 0)
+    }
+
+    /// What a count leads with: the committed lines when there are any,
+    /// else the uncommitted; and whether the uncommitted follow it in
+    /// parentheses (both have lines).
+    pub fn lead(&self) -> ((u32, u32), bool) {
+        match self.committed == (0, 0) {
+            true => (self.uncommitted, false),
+            false => (self.committed, self.uncommitted != (0, 0)),
+        }
+    }
+}
+
+/// `useGitStatus`' `locStats`: lines added and removed since the branch's
+/// base (nothing on the default branch itself) and in the working tree,
+/// where untracked files count each of their lines as added. Whatever git
+/// can't say counts as zero.
+pub fn loc_stats(dir: &str) -> Loc {
+    let counts = |args: &[&str]| git(args, dir).map_or((0, 0), |stat| shortstat_counts(&stat));
+    let default = default_branch(dir);
+    let base = match current_branch(dir) {
+        Ok(current) if current != default => Some(base_branch(dir, &current, &default)),
+        _ => None,
+    };
+    let committed = base.as_ref().map_or((0, 0), |base| counts(&["diff", "--shortstat", &format!("{base}...HEAD")]));
+    let (tracked_adds, dels) = counts(&["diff", "--shortstat", "HEAD"]);
+    Loc { committed, uncommitted: (tracked_adds + untracked_lines(dir), dels), base }
+}
+
+/// [`find_base_branch`], kept while the directory, branch and HEAD stay
+/// (`baseCacheRef`): it asks git twice per local branch.
+fn base_branch(dir: &str, current: &str, default: &str) -> String {
+    static LAST: Mutex<Option<(String, String)>> = Mutex::new(None);
+    let head = git(&["rev-parse", "HEAD"], dir).unwrap_or_default();
+    let key = format!("{dir}\0{current}\0{}", head.trim());
+    if let Some((_, base)) = LAST.lock().unwrap().as_ref().filter(|(k, _)| *k == key) {
+        return base.clone();
+    }
+    let base = find_base_branch(dir, default);
+    *LAST.lock().unwrap() = Some((key, base.clone()));
+    base
+}
+
+/// The local branch nearest above HEAD (fewest commits since their
+/// merge-base), the default one winning ties; a branch at or ahead of HEAD
+/// can't be its parent. The default branch when it isn't among them, since
+/// it then already contains HEAD (`findBaseBranch`).
+fn find_base_branch(dir: &str, default: &str) -> String {
+    let Ok(head) = git(&["rev-parse", "HEAD"], dir) else { return default.to_owned() };
+    let head = head.trim();
+    let Ok(refs) = git(&["for-each-ref", "--format=%(refname:short)", "refs/heads"], dir) else {
+        return default.to_owned();
+    };
+    let (mut best, mut best_count, mut saw_default) = (default, u32::MAX, false);
+    for name in refs.lines().map(str::trim).filter(|n| !n.is_empty()) {
+        let Ok(base) = git(&["merge-base", name, "HEAD"], dir) else { continue };
+        let base = base.trim();
+        if base == head {
+            continue;
+        }
+        let Ok(count) = git(&["rev-list", "--count", &format!("{base}..HEAD")], dir) else { continue };
+        let Ok(count) = count.trim().parse::<u32>() else { continue };
+        saw_default |= name == default;
+        if count < best_count || (count == best_count && name == default) {
+            (best, best_count) = (name, count);
+        }
+    }
+    (if saw_default { best } else { default }).to_owned()
+}
+
+/// Lines in the files git doesn't track or ignore (`wc -l`: newlines).
+fn untracked_lines(dir: &str) -> u32 {
+    let Ok(files) = git(&["ls-files", "-z", "--others", "--exclude-standard"], dir) else { return 0 };
+    files
+        .split('\0')
+        .filter(|f| !f.is_empty())
+        .filter_map(|f| std::fs::read(Path::new(dir).join(f)).ok())
+        .map(|bytes| bytes.iter().filter(|b| **b == b'\n').count() as u32)
+        .sum()
+}
+
+/// `(insertions, deletions)` of a `--shortstat` line; zero for what it
+/// doesn't name (`parseShortstat`).
+pub fn shortstat_counts(stat: &str) -> (u32, u32) {
+    let count = |word: &str| {
+        stat.split(',')
+            .filter_map(|part| {
+                let mut tokens = part.split_whitespace();
+                let n = tokens.next()?.parse().ok()?;
+                tokens.next()?.starts_with(word).then_some(n)
+            })
+            .next()
+            .unwrap_or(0)
+    };
+    (count("insertion"), count("deletion"))
 }
 
 /// What a repo's `repo-config.json` entry asks of a new worktree.

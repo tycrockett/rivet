@@ -879,7 +879,7 @@ impl Shell {
         });
     }
 
-    fn directory_untracked(&self) -> String {
+    pub fn directory_untracked(&self) -> String {
         self.settings.with_untracked(|s| s.directory.clone())
     }
 
