@@ -12,9 +12,9 @@
 //!
 //! The tool schemas are Bolt's, verbatim (`tools.json`, dumped from
 //! `_handleToolsList`). The tools Rivet has nothing behind (selection,
-//! diagnostics, web tabs, the model canvas, graphs, boards, terminal
-//! transcripts, group sessions) stay listed and answer that they are not
-//! supported here.
+//! diagnostics, the model canvas, graphs, boards, terminal transcripts,
+//! group sessions) stay listed and answer that they are not supported
+//! here; those it backs in part (the web tab tools) say what is missing.
 //!
 //! Unlike Bolt's, a request carrying an `Origin` that is not this machine is
 //! refused: a web page could otherwise post to it and type into terminals.
@@ -22,6 +22,7 @@
 mod editor;
 mod notes;
 mod terminals;
+mod web;
 mod workspace;
 
 use std::{
@@ -55,8 +56,6 @@ const UNSUPPORTED: &[&str] = &[
     "getCurrentSelection",
     "getLatestSelection",
     "getDiagnostics",
-    "getInspectedElement",
-    "browse",
     "startGroupSession",
     "readTerminals",
     "readBoard",
@@ -120,6 +119,9 @@ async fn dispatch(shell: Shell, name: &str, args: &Value) -> ToolResult {
         return r;
     }
     if let Some(r) = notes::call(shell, name, args).await {
+        return r;
+    }
+    if let Some(r) = web::call(shell, name, args).await {
         return r;
     }
     Err(format!("Unknown tool: {name}"))
@@ -274,14 +276,17 @@ fn initialize(params: &Value) -> Value {
     })
 }
 
-/// Bolt's schemas, the unsupported ones saying so first.
+/// Bolt's schemas, the unsupported ones saying so first, the partly
+/// supported ones what they lack.
 fn tools_list() -> Value {
     let mut tools: Vec<Value> = serde_json::from_str(TOOLS_JSON).expect("tools.json is valid JSON");
     for tool in &mut tools {
         let name = tool["name"].as_str().unwrap_or_default();
+        let description = tool["description"].as_str().unwrap_or_default();
         if UNSUPPORTED.contains(&name) {
-            let description = tool["description"].as_str().unwrap_or_default();
             tool["description"] = Value::String(format!("Not supported in Rivet: returns an error. {description}"));
+        } else if let Some((_, note)) = web::NOTES.iter().find(|(n, _)| *n == name) {
+            tool["description"] = Value::String(format!("{note} {description}"));
         }
     }
     json!({ "tools": tools })

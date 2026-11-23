@@ -30,6 +30,7 @@ mod state;
 mod terminals;
 mod theme;
 mod viewer;
+mod web;
 mod workspace;
 
 use nsh_base::{h_resizable, resizable_panel, theme};

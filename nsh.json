@@ -5,5 +5,20 @@
   "build": 1,
   "rust": ".",
   "root": "App",
-  "appearance": "dark"
+  "appearance": "dark",
+  "capabilities": {
+    "network": { "hosts": ["*"] },
+    "webview": { "hosts": ["*"], "input": true },
+    "statusBar": true,
+    "clipboard": true,
+    "picker": true,
+    "share": true,
+    "speech": true,
+    "notifications": true,
+    "audio": true,
+    "application": true,
+    "homeDir": true,
+    "openUrl": true,
+    "windows": true
+  }
 }

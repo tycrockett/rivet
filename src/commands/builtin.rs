@@ -214,6 +214,21 @@ pub fn diff(ctx: &Ctx) -> Result {
     Ok(())
 }
 
+/// `browser [url]` (`webCommand`): a web tab here, on `url` or blank;
+/// `browser <url> -o` hands it to the system browser instead (Bolt asks
+/// which browser window).
+pub fn browser(ctx: &Ctx) -> Result {
+    let url = ctx.positional().map(crate::web::to_url);
+    if ctx.flag(&["--open", "-o"]) {
+        if let Some(url) = url {
+            let _ = open_url(url);
+        }
+        return Ok(());
+    }
+    ctx.shell.open_web(ctx.directory.clone(), url.unwrap_or_default());
+    Ok(())
+}
+
 /// `terminal` opens one in the current directory; `terminal -o` lists the
 /// shells whose directory is gone or has no tab.
 pub fn terminal(ctx: &Ctx) -> Result {

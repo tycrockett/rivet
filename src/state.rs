@@ -99,12 +99,35 @@ pub struct Changes {
     pub n: u64,
 }
 
+/// A web tab of a workspace (Bolt's `WebTab`, `mode: "web"`): its page
+/// stays loaded while the tab is open, shown or not (`web.rs`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Web {
+    pub id: u64,
+    pub cwd: String,
+    /// The URL it opened on, empty for a blank tab (Bolt's tab id
+    /// `web:<url>`): `browser <url>` again shows this tab.
+    pub opened: String,
+    /// The page's URL now, empty while none loaded.
+    pub url: String,
+    pub loading: bool,
+    pub back: bool,
+    pub forward: bool,
+    /// The `browse` MCP tool may navigate, click and type in it (Bolt's
+    /// robot button).
+    pub armed: bool,
+    /// Bumped by each shift-click in the page, for the toolbar's flash.
+    pub inspected: u64,
+}
+
 #[derive(Clone, Copy)]
 pub struct Shell {
     pub settings: Signal<Settings>,
     pub terms: Signal<Vec<Term>>,
     /// The files open in columns.
     pub docs: Signal<Vec<Doc>>,
+    /// The web tabs, every workspace's.
+    pub webs: Signal<Vec<Web>>,
     /// The Changes tabs open in columns, one per workspace at most.
     pub changes: Signal<Vec<Changes>>,
     /// The Settings tab, and the workspace whose columns hold it.
@@ -175,6 +198,7 @@ pub fn provide() -> Shell {
         settings: signal(settings::load()),
         terms: signal(Vec::new()),
         docs: signal(Vec::new()),
+        webs: signal(Vec::new()),
         changes: signal(Vec::new()),
         settings_tab: signal(None),
         columns: signal(HashMap::new()),
@@ -657,8 +681,49 @@ impl Shell {
         });
     }
 
+    /// Opens a web tab on `url` (blank when empty) and shows it
+    /// (`openWebAtom`): the tab of `cwd` that opened on the same URL is
+    /// shown again instead; blank tabs are always new.
+    pub fn open_web(&self, cwd: String, url: String) {
+        let open = (!url.is_empty())
+            .then(|| self.webs.with_untracked(|w| w.iter().find(|w| w.cwd == cwd && w.opened == url).map(|w| w.id)))
+            .flatten();
+        if let Some(id) = open {
+            return self.show(id);
+        }
+        let id = next_id();
+        self.webs.update(|w| {
+            w.push(Web {
+                id,
+                cwd: cwd.clone(),
+                opened: url.clone(),
+                url,
+                loading: false,
+                back: false,
+                forward: false,
+                armed: false,
+                inspected: 0,
+            })
+        });
+        let new_column = self.opens_new_column();
+        self.columns.update(|c| c.entry(cwd).or_default().add(id, new_column));
+    }
+
+    /// Changes web tab `id`, if it is still open.
+    pub fn update_web(&self, id: u64, f: impl FnOnce(&mut Web)) {
+        self.webs.update(|w| {
+            if let Some(web) = w.iter_mut().find(|w| w.id == id) {
+                f(web);
+            }
+        });
+    }
+
+    pub fn web(&self, id: u64) -> Option<Web> {
+        self.webs.with_untracked(|w| w.iter().find(|w| w.id == id).cloned())
+    }
+
     /// Closes a tab (`closeTabAtom`): a terminal's shell is killed, a
-    /// file's, the Changes or the Settings tab dropped.
+    /// file's, web page's, the Changes or the Settings tab dropped.
     pub fn close_tab(&self, id: u64) {
         if let Some(live) = PTYS.with(|p| p.borrow_mut().remove(&id)) {
             live.pty.kill();
@@ -668,6 +733,7 @@ impl Shell {
         };
         self.terms.update(|t| t.retain(|t| t.id != id));
         self.docs.update(|d| d.retain(|d| d.id != id));
+        self.webs.update(|w| w.retain(|w| w.id != id));
         self.changes.update(|c| c.retain(|c| c.id != id));
         if self.settings_tab.with_untracked(|s| s.as_ref().is_some_and(|(s, _)| *s == id)) {
             self.settings_tab.set(None);
@@ -684,6 +750,7 @@ impl Shell {
         self.terms
             .with_untracked(|t| t.iter().find(|t| t.id == id).map(|t| t.cwd.clone()))
             .or_else(|| self.docs.with_untracked(|d| d.iter().find(|d| d.id == id).map(|d| d.cwd.clone())))
+            .or_else(|| self.webs.with_untracked(|w| w.iter().find(|w| w.id == id).map(|w| w.cwd.clone())))
             .or_else(|| self.changes.with_untracked(|c| c.iter().find(|c| c.id == id).map(|c| c.cwd.clone())))
             .or_else(|| self.settings_tab.with_untracked(|s| s.as_ref().filter(|(s, _)| *s == id).map(|(_, cwd)| cwd.clone())))
     }

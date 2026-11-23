@@ -4,7 +4,9 @@
 //! are dragged wider and narrower, and rearranged from the pane overlay
 //! (⌘'). Only the shown terminals are mounted; every terminal keeps its
 //! emulator in the shell state, so one shown again, or moved to another
-//! column, comes back with its screen and scrollback.
+//! column, comes back with its screen and scrollback. Web pages cannot be
+//! kept that way: they live in a layer over the row (`web.rs`), laid over
+//! the column that shows them.
 
 use std::{
     cell::{Cell, RefCell},
@@ -25,9 +27,10 @@ use crate::{
     hub::{self, Hub, HubEntry, next_id},
     notes,
     panes::{Columns, ROWS},
-    state::{self, Doc, Shell, Term, shell},
+    state::{self, Doc, Shell, Term, Web, shell},
     theme::{BOLT_THEME, Xterm},
     viewer,
+    web::{self, Layer},
 };
 
 fn color(c: u32) -> Hsla {
@@ -111,8 +114,14 @@ pub fn terminals() -> impl IntoElement {
     let layout = computed(move || current(shell).groups.iter().map(|g| g.id).collect::<Vec<_>>());
     let row_width = signal(0.0_f32);
     let bar = ActiveBar { row: element_ref(), at: signal(None) };
+    let layer = Layer::new(bar.row);
     // Another column taking the focus moves the bar without a layout.
     effect(move || bar.measure(shell));
+    // Columns coming, going or reordering move the pages with them.
+    effect(move || {
+        current(shell);
+        layer.measure();
+    });
     view()
         .flex_1()
         .bg(move || nsh_base::theme().sidebar)
@@ -121,6 +130,7 @@ pub fn terminals() -> impl IntoElement {
         .on_layout(move |b: &Bounds<Points>| {
             row_width.set(b.size.width.0);
             bar.measure(shell);
+            layer.measure();
         })
         .child(
             h_resizable()
@@ -148,18 +158,21 @@ pub fn terminals() -> impl IntoElement {
                             let width = width.get();
                             (width > 0.0).then(|| px(width * row_width.get()))
                         })
-                        .child(column(shell, hub, id, joins, bar))
+                        .child(column(shell, hub, id, joins, bar, layer))
                 })),
         )
+        .child(layer.view(shell))
         .child(bar.view())
         .child(panes_overlay(shell))
 }
 
-/// A column's tab: a terminal, a file, the Changes or the Settings tab.
+/// A column's tab: a terminal, a file, a web page, the Changes or the
+/// Settings tab.
 #[derive(Debug, Clone, PartialEq)]
 enum TabItem {
     Term(Term),
     Doc(Doc),
+    Web(Web),
     Changes(u64),
     Settings(u64),
 }
@@ -169,6 +182,7 @@ impl TabItem {
         match self {
             TabItem::Term(t) => t.id,
             TabItem::Doc(d) => d.id,
+            TabItem::Web(w) => w.id,
             TabItem::Changes(id) | TabItem::Settings(id) => *id,
         }
     }
@@ -182,6 +196,7 @@ impl TabItem {
                 let name = Path::new(&d.path).file_name().map_or_else(|| d.path.clone(), |n| n.to_string_lossy().into_owned());
                 if d.proposal.is_some() { format!("Diff: {name}") } else { name }
             }
+            TabItem::Web(w) => web::label(&w.url),
             TabItem::Changes(_) => "Changes".into(),
             TabItem::Settings(_) => "Settings".into(),
         }
@@ -198,6 +213,7 @@ fn column(
     group: u64,
     joins: impl Fn() -> (bool, bool) + Copy + 'static,
     bar: ActiveBar,
+    layer: Layer,
 ) -> impl IntoElement {
     let left = move || if joins().0 { 6.0 } else { 12.0 };
     let right = move || if joins().1 { 6.0 } else { 12.0 };
@@ -206,7 +222,7 @@ fn column(
     let items = move || {
         let cols = current(shell);
         let ids = cols.groups.iter().find(|g| g.id == group).map(|g| g.tabs.clone()).unwrap_or_default();
-        let (terms, docs) = (shell.terms.get(), shell.docs.get());
+        let (terms, docs, webs) = (shell.terms.get(), shell.docs.get(), shell.webs.get());
         let changes = shell.changes.with(|c| c.iter().map(|c| c.id).collect::<Vec<_>>());
         let settings = shell.settings_tab.with(|s| s.as_ref().map(|(id, _)| *id));
         ids.iter()
@@ -216,6 +232,7 @@ fn column(
                     .find(|t| t.id == *id)
                     .map(|t| TabItem::Term(t.clone()))
                     .or_else(|| docs.iter().find(|d| d.id == *id).map(|d| TabItem::Doc(d.clone())))
+                    .or_else(|| webs.iter().find(|w| w.id == *id).map(|w| TabItem::Web(w.clone())))
                     .or_else(|| changes.contains(id).then_some(TabItem::Changes(*id)))
                     .or_else(|| (settings == Some(*id)).then_some(TabItem::Settings(*id)))
             })
@@ -240,7 +257,10 @@ fn column(
                 // Measured for the active-column bar: as wide as the column,
                 // and not the column itself, whose ref the hint takes.
                 .element_ref(&view_ref)
-                .on_layout(move |_: &Bounds<Points>| bar.measure(shell))
+                .on_layout(move |_: &Bounds<Points>| {
+                    bar.measure(shell);
+                    layer.measure();
+                })
                 .flex_row()
                 .items_center()
                 .h(px(36.0))
@@ -305,6 +325,8 @@ fn column(
                                 term_view().term(id as u32).group(group as u32).flex_1().into_element()
                             } else if shell.changes.with_untracked(|c| c.iter().any(|c| c.id == id)) {
                                 changes::changes_view().tab(id as u32).flex_1().into_element()
+                            } else if shell.webs.with_untracked(|w| w.iter().any(|w| w.id == id)) {
+                                web::tab_view(shell, layer, id, active.get_untracked()).into_element()
                             } else if shell.settings_tab.with_untracked(|s| s.as_ref().is_some_and(|(s, _)| *s == id)) {
                                 crate::settings_tab::settings_view(shell)
                             } else {

@@ -138,7 +138,8 @@ struct Tab {
 }
 
 /// Tab `id` of any workspace, as a Bolt tab: a terminal's `filePath` is its
-/// directory; a Changes or Settings tab has no path, so its id's name.
+/// directory, a web tab's its URL; a Changes or Settings tab has no path,
+/// so its id's name.
 fn describe(shell: Shell, id: u64) -> Option<Tab> {
     if let Some(tab) = shell.terms.with_untracked(|t| {
         t.iter().find(|t| t.id == id).map(|t| Tab {
@@ -164,6 +165,17 @@ fn describe(shell: Shell, id: u64) -> Option<Tab> {
                 },
                 None => Tab { mode: "file", file_path: d.path.clone(), names: vec![d.path.clone(), base], dirty: viewer::is_dirty(id) },
             }
+        })
+    }) {
+        return Some(tab);
+    }
+    if let Some(tab) = shell.webs.with_untracked(|w| {
+        w.iter().find(|w| w.id == id).map(|w| Tab {
+            mode: "web",
+            file_path: w.url.clone(),
+            // Bolt's id is `web:<the URL it opened on>`.
+            names: [format!("web:{}", w.opened), w.opened.clone(), w.url.clone()].into_iter().filter(|n| !n.is_empty() && n != "web:").collect(),
+            dirty: false,
         })
     }) {
         return Some(tab);

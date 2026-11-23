@@ -5,8 +5,8 @@
 //! message, a conflict list, the status lists) is plain text here.
 //!
 //! Where Bolt opens a view this app has no counterpart of (a diff tab, the
-//! in-app browser, the close-tab modal, the AI client) the nearest thing is
-//! done instead and the file says so at that spot.
+//! close-tab modal, the AI client) the nearest thing is done instead and
+//! the file says so at that spot.
 
 use std::{fmt::Display, path::Path};
 
@@ -699,9 +699,9 @@ pub async fn rename(ctx: &Ctx) -> Result {
 }
 
 /// `open [--browser]`: the branch's PR (GitHub, through `gh`) or its compare
-/// / tree page. Bolt shows it in its in-app browser unless `--browser`; here
-/// both go to the system browser. `open <path>[:line[:column]]` opens the
-/// file in Helix (`hx`) in a new terminal instead.
+/// / tree page, in a web tab, or the system browser with `--browser`.
+/// `open <path>[:line[:column]]` opens the file in Helix (`hx`) in a new
+/// terminal instead.
 pub async fn open(ctx: &Ctx) -> Result {
     if let Some(arg) = ctx.positional() {
         return open_file(ctx, arg);
@@ -726,8 +726,12 @@ pub async fn open(ctx: &Ctx) -> Result {
         format!("{web}/-/tree/{branch}?ref_type=heads")
     };
 
-    let cwd = dir.to_owned();
-    git::off_thread(move || git::shell("/usr/bin/open", &[git::shell_quote(&target)], &cwd)).await?;
+    if ctx.flag(&["--browser"]) {
+        let cwd = dir.to_owned();
+        git::off_thread(move || git::shell("/usr/bin/open", &[git::shell_quote(&target)], &cwd)).await?;
+    } else {
+        ctx.shell.open_web(ctx.directory.clone(), target);
+    }
     Ok(())
 }
 

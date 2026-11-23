@@ -31,8 +31,13 @@ fn main() -> impl std::process::Termination {
         "titleBar": { "style": "hidden", "height": 36 }
     }))
     .expect("the window options are valid");
+    // `nsh.json`'s capabilities, as `nsh run`'s generated code declares
+    // them: what an undeclared app gets, plus trusted input for web tabs
+    // (`browse click` / `type`), which nothing grants by default.
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("../nsh.json")).expect("nsh.json is valid JSON");
+    let capabilities = nsh_core::access::Capabilities::from_json(&manifest["capabilities"]).expect("nsh.json's capabilities are valid");
     platform::run_app(
-        platform::AppSource::Rust(platform::Root::of::<rivet::App>().main_window(window)),
+        platform::AppSource::Rust(platform::Root::of::<rivet::App>().main_window(window).capabilities(capabilities)),
         platform::AppOptions {
             title: "Rivet".to_owned(),
             #[cfg(any(target_os = "linux", target_os = "windows"))]

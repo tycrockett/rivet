@@ -3,8 +3,8 @@
 //! passes through, then `/custom` commands from settings, then the
 //! registry; anything else is `command not found`.
 //!
-//! Commands whose effect lives outside this shell (the diff view, notes,
-//! boards, the browser, settings pages) are listed but not runnable here:
+//! Commands whose effect lives outside this shell (notes' snippets,
+//! boards, settings pages) are listed but not runnable here:
 //! [`Command::ported`] is false and running one says so.
 
 mod branch;
@@ -81,7 +81,7 @@ pub const REGISTRY: &[Command] = &[
     cmd("help", Kind::BuiltIn, true),
     cmd("todo", Kind::BuiltIn, false),
     cmd("terminal", Kind::BuiltIn, true),
-    cmd("browser", Kind::BuiltIn, false),
+    cmd("browser", Kind::BuiltIn, true),
     cmd("trace", Kind::Git, true),
     cmd("edit", Kind::BuiltIn, false),
     cmd("notes", Kind::BuiltIn, true),
@@ -333,6 +333,7 @@ async fn execute(ctx: &Ctx) -> Result<(), String> {
         "help" => builtin::help(ctx),
         "terminal" => builtin::terminal(ctx),
         "diff" => builtin::diff(ctx),
+        "browser" => builtin::browser(ctx),
         "pwd" => {
             ctx.add("pwd", ctx.directory.clone());
             Ok(())
