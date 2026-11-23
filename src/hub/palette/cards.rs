@@ -18,6 +18,8 @@ use crate::{
 };
 
 pub const FG: u32 = 0xffffff;
+/// The finder's accent: its chip, and the palette while it is open.
+pub const FINDER_TONE: u32 = 0x38bdf8;
 const REPLY_LINES: usize = 6;
 
 pub fn muted() -> Rgba {
@@ -64,7 +66,7 @@ fn tint(error_card: bool) -> AdaptiveColor {
 }
 
 /// A pill: icon and label; in a narrow palette the label is cut to fit.
-fn chip(icon: &'static str, label: impl IntoReactive<SharedString>, tone: Rgba) -> View {
+pub fn chip(icon: &'static str, label: impl IntoReactive<SharedString>, tone: Rgba) -> View {
     view()
         .flex_row()
         .items_center()
@@ -1019,7 +1021,7 @@ pub fn finder_card(
             .px_3()
             .pt(px(10.0))
             .pb_2()
-            .child(chip("▸", if done { "finder closed" } else { "finder" }, if done { rgb(FG) } else { rgb(0x38bdf8) }))
+            .child(chip("▸", if done { "finder closed" } else { "finder" }, if done { rgb(FG) } else { rgb(FINDER_TONE) }))
             .child(text(move || dir_of()).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted())),
     );
     if done {

@@ -12,7 +12,7 @@ use nsh_core::prelude::*;
 use std::time::Duration;
 
 use self::{
-    cards::{FG, faint, mix, muted},
+    cards::{FG, FINDER_TONE, chip, faint, mix, muted},
     editor::{Editor, Item, editor},
 };
 use crate::{
@@ -721,6 +721,15 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
     let (from, to) = (mix(color, 0x000000, 0.45), mix(color, 0x000000, 0.80));
     let close = move || hub.palette.set(None);
     let can_send = move || said.get().1;
+    // While a finder is open the line goes to it: the header says so, and
+    // the input is framed in the finder's color.
+    let in_finder = {
+        let env = env.clone();
+        computed(move || env.open_finder().is_some())
+    };
+    let placeholder = computed(move || {
+        if in_finder.get() { "folder name, cd <path>, .., ~, mkdir, tab, bm · exit leaves the finder" } else { "/command, @handle message, #script, :keyword, or a shell command" }
+    });
 
     let send_env = env.clone();
     let enter_env = env.clone();
@@ -757,6 +766,7 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(rgba(0xffffffb3)),
                 )
+                .child(when(move || in_finder.get(), || chip("▸", "finder", rgb(FINDER_TONE)).flex_shrink(0.0)))
                 .child(
                     text(move || self_path.get().unwrap_or_default())
                         .flex_1()
@@ -811,7 +821,9 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                 .px_2()
                 .pt_2()
                 .pb(px(10.0))
-                .bg(rgba(0x00000059))
+                .bg(move || if in_finder.get() { mix(FINDER_TONE, 0x000000, 0.25).opacity(0.6) } else { rgba(0x00000059) })
+                .border_1()
+                .border_color(move || if in_finder.get() { rgb(FINDER_TONE).opacity(0.7) } else { rgba(0x00000000) })
                 .child(editor(Editor {
                     value: typed,
                     commands: menu,
@@ -823,6 +835,7 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                     close: Rc::new(close),
                     input_ref,
                     lead,
+                    placeholder,
                 }))
                 .child(
                     view()

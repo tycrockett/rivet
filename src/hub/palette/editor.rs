@@ -318,10 +318,12 @@ pub struct Editor {
     /// The keyword the plan found, as bytes at the line's start.
     pub lead: Memo<usize>,
     pub close: Rc<dyn Fn()>,
+    /// What the empty input says: the finder's lines while it is open.
+    pub placeholder: Memo<&'static str>,
 }
 
 pub fn editor(e: Editor) -> impl IntoElement {
-    let Editor { value, commands, scripts, targets, files, on_enter, on_tab, input_ref, lead, close } = e;
+    let Editor { value, commands, scripts, targets, files, on_enter, on_tab, input_ref, lead, close, placeholder } = e;
     let commands = Rc::new(commands);
     let caret = signal(0_usize);
     let sel = signal(0_usize);
@@ -455,7 +457,7 @@ pub fn editor(e: Editor) -> impl IntoElement {
                 .auto_focus(true)
                 .auto_correct(false)
                 .auto_capitalize(AutoCapitalize::None)
-                .placeholder("/command, @handle message, #script, :keyword, or a shell command")
+                .placeholder(move || placeholder.get().to_owned())
                 .placeholder_color(rgba(0xffffff80))
                 .caret_color(white())
                 .selection_color(rgba(0xffffff40))
