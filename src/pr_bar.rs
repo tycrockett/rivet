@@ -1,6 +1,6 @@
 //! Bolt's PR card (`PrStatusBox`) as a header bar above the terminals: the
 //! current workspace's open PR on one line (its number, checks, review,
-//! comments: new since the branch's last push, unresolved threads, total)
+//! comments: new from others since the branch's last push, unresolved threads, total)
 //! and the merge button. A press on the line, or `pr.toggle` (⇧⌘P), opens
 //! the rest in a dialog: title, link, reviewers, each check, each comment.
 //! Nothing shows for a workspace without an open PR, except a PR just

@@ -34,6 +34,9 @@ pub struct Pr {
     pub comments: Vec<IssueComment>,
     #[serde(default)]
     pub reviews: Vec<Review>,
+    /// Who opened the PR: their own comments are never new.
+    #[serde(default)]
+    pub author: Option<Author>,
 }
 
 /// A CheckRun (status + conclusion, name, detailsUrl) or a StatusContext
@@ -87,8 +90,8 @@ pub struct Review {
     pub submitted_at: String,
 }
 
-/// A review thread flattened to its opening comment, with when its latest
-/// comment came (a reply after a push makes an old thread new again).
+/// A review thread flattened to its opening comment, with who said each of
+/// its comments when (a reply after a push makes an old thread new again).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Thread {
     pub resolved: bool,
@@ -100,7 +103,13 @@ pub struct Thread {
     pub body: String,
     pub at: String,
     #[serde(default)]
-    pub last_at: String,
+    pub comments: Vec<ThreadComment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ThreadComment {
+    pub author: String,
+    pub at: String,
 }
 
 /// The chip's color (`prBadge`).
@@ -273,7 +282,8 @@ pub struct Comment {
     pub resolved: Option<bool>,
     pub path: Option<String>,
     pub line: Option<u64>,
-    /// Said (or, for a thread, last replied to) after the last push.
+    /// Said (or, for a thread, last replied to) after the last push by
+    /// someone other than the PR's author.
     pub fresh: bool,
 }
 
@@ -289,7 +299,8 @@ impl Detail {
     /// Newest first (`prComments`).
     pub fn comments(&self) -> Vec<Comment> {
         let pushed = self.pushed_at.as_deref().and_then(unix_ms_of);
-        let fresh = |at: &str| pushed.is_some_and(|p| unix_ms_of(at).is_some_and(|a| a > p));
+        let pr_author = self.pr.author.as_ref().map(|a| a.login.as_str());
+        let fresh = |who: &str, at: &str| pr_author != Some(who) && pushed.is_some_and(|p| unix_ms_of(at).is_some_and(|a| a > p));
         let pr = &self.pr;
         let mut all: Vec<Comment> = pr
             .comments
@@ -302,7 +313,7 @@ impl Detail {
                 resolved: None,
                 path: None,
                 line: None,
-                fresh: fresh(&c.created_at),
+                fresh: fresh(&login_of(&c.author), &c.created_at),
             })
             .chain(pr.reviews.iter().filter(|r| !r.body.trim().is_empty()).map(|r| Comment {
                 author: login_of(&r.author),
@@ -312,7 +323,7 @@ impl Detail {
                 resolved: None,
                 path: None,
                 line: None,
-                fresh: fresh(&r.submitted_at),
+                fresh: fresh(&login_of(&r.author), &r.submitted_at),
             }))
             .chain(self.threads.iter().map(|t| Comment {
                 author: t.author.clone(),
@@ -322,7 +333,7 @@ impl Detail {
                 resolved: Some(t.resolved),
                 path: Some(t.path.clone()).filter(|p| !p.is_empty()),
                 line: t.line,
-                fresh: fresh(&t.at) || fresh(&t.last_at),
+                fresh: t.comments.iter().any(|c| fresh(&c.author, &c.at)),
             }))
             .collect();
         all.sort_by(|a, b| b.at.cmp(&a.at));
@@ -371,7 +382,7 @@ fn gh(dir: &str, args: &[&str]) -> Option<Vec<u8>> {
 }
 
 const FIELDS: &str = "state,url,title,number,isDraft,reviewDecision,statusCheckRollup";
-const DETAIL_FIELDS: &str = "state,url,title,number,isDraft,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus,headRefName,comments,reviews";
+const DETAIL_FIELDS: &str = "state,url,title,number,isDraft,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus,headRefName,comments,reviews,author";
 
 /// The open PR of `dir`'s branch; none for a merged or closed one, or
 /// without `gh`.
@@ -383,8 +394,8 @@ pub fn fetch(dir: &str) -> Option<Pr> {
 // Resolved lives on review threads, which `gh pr view --json` has no field
 // for: only GraphQL has `isResolved`. gh fills `{owner}` and `{repo}` from
 // the directory's remote.
-const THREADS_Q: &str = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved path line comments(first:1){nodes{author{login} body createdAt}} latest:comments(last:1){nodes{createdAt}}}}}}}";
-const THREADS_JQ: &str = r#"[.data.repository.pullRequest.reviewThreads.nodes[] | {resolved:.isResolved, path:(.path // ""), line:.line, author:(.comments.nodes[0].author.login // "unknown"), body:(.comments.nodes[0].body // ""), at:(.comments.nodes[0].createdAt // ""), last_at:(.latest.nodes[0].createdAt // "")}]"#;
+const THREADS_Q: &str = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved path line comments(first:1){nodes{author{login} body createdAt}} all:comments(last:100){nodes{author{login} createdAt}}}}}}}";
+const THREADS_JQ: &str = r#"[.data.repository.pullRequest.reviewThreads.nodes[] | {resolved:.isResolved, path:(.path // ""), line:.line, author:(.comments.nodes[0].author.login // "unknown"), body:(.comments.nodes[0].body // ""), at:(.comments.nodes[0].createdAt // ""), comments:[.all.nodes[] | {author:(.author.login // "unknown"), at:.createdAt}]}]"#;
 // A branch's pushes, force pushes and its creation are all pushes of it.
 const PUSH_JQ: &str = r#"[.[] | select(.activity_type == "push" or .activity_type == "force_push" or .activity_type == "branch_creation")][0].timestamp // """#;
 
@@ -465,32 +476,34 @@ mod tests {
     }
 
     #[test]
-    fn new_counts_what_came_after_the_last_push_and_thread_replies_revive_old_threads() {
-        let pr = pr(r#"{"number":1,"title":"t","url":"u","state":"OPEN",
+    fn new_counts_what_others_said_after_the_last_push_and_their_replies_revive_old_threads() {
+        let pr = pr(r#"{"number":1,"title":"t","url":"u","state":"OPEN","author":{"login":"me"},
             "comments":[{"author":{"login":"a"},"body":"before","createdAt":"2026-11-20T10:00:00Z"},
+                        {"author":{"login":"me"},"body":"mine","createdAt":"2026-11-20T11:45:00Z"},
                         {"author":{"login":"b"},"body":"after","createdAt":"2026-11-20T12:00:00Z"}],
             "reviews":[{"author":{"login":"c"},"body":"","state":"APPROVED","submittedAt":"2026-11-20T13:00:00Z"},
                        {"author":{"login":"c"},"body":"lgtm","state":"COMMENTED","submittedAt":"2026-11-20T09:00:00Z"}]}"#);
-        let thread = |resolved: bool, at: &str, last_at: &str| Thread {
+        let thread = |resolved: bool, said: &[(&str, &str)]| Thread {
             resolved,
             path: "a.rs".into(),
             line: Some(3),
             author: "d".into(),
             body: "fix".into(),
-            at: at.into(),
-            last_at: last_at.into(),
+            at: "2026-11-20T08:00:00Z".into(),
+            comments: said.iter().map(|(author, at)| ThreadComment { author: (*author).into(), at: (*at).into() }).collect(),
         };
         let detail = Detail {
             pr,
             threads: vec![
-                thread(false, "2026-11-20T08:00:00Z", "2026-11-20T11:30:00Z"),
-                thread(true, "2026-11-20T08:00:00Z", "2026-11-20T08:00:00Z"),
-                thread(false, "2026-11-20T08:00:00Z", ""),
+                thread(false, &[("d", "2026-11-20T08:00:00Z"), ("d", "2026-11-20T11:30:00Z")]),
+                thread(true, &[("d", "2026-11-20T08:00:00Z")]),
+                // The PR author answering a thread after the push leaves it old.
+                thread(false, &[("d", "2026-11-20T08:00:00Z"), ("me", "2026-11-20T11:30:00Z")]),
             ],
             pushed_at: Some("2026-11-20T11:00:00Z".into()),
         };
         // The empty-bodied approval is no comment.
-        assert_eq!(detail.counts(), CommentCounts { new: Some(2), unresolved: 2, total: 6 });
+        assert_eq!(detail.counts(), CommentCounts { new: Some(2), unresolved: 2, total: 7 });
         assert_eq!(detail.comments()[0].body, "after");
         assert_eq!(Detail { pushed_at: None, ..detail }.counts().new, None);
     }
