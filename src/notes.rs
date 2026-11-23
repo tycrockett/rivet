@@ -1,6 +1,7 @@
-//! Bolt notes (`notesStore`, `useNotesPoll`, `NotesStrip`): `.md` files in
-//! the Electron Bolt's `bolt-notes` folder, shared by every terminal and
-//! written by agents through its `saveNote` tool. Under an omp terminal a
+//! Rivet notes (Bolt's `notesStore`, `useNotesPoll`, `NotesStrip`): `.md`
+//! files in the Electron Bolt's `bolt-notes` folder, shared by every
+//! terminal and by both apps (so the folder keeps Bolt's name), and
+//! written by agents through the `saveNote` tool. Under an omp terminal a
 //! strip shows one tile per note, newest edit first; a note that
 //! @mentions this terminal or its workspace is outlined and moved to the
 //! front. A terminal in a group's home or one of its tabs also gets that

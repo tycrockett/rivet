@@ -1,6 +1,6 @@
 //! The terminals of the current workspace, in columns (Bolt's editor
 //! groups): each column a tab bar over a framed box (`TermGraphSplit`) that
-//! shows its active terminal, with the Bolt notes strip under it. Columns
+//! shows its active terminal, with the rivet notes strip under it. Columns
 //! are dragged wider and narrower, and rearranged from the pane overlay
 //! (⌘'). Only the shown terminals are mounted; every terminal keeps its
 //! emulator in the shell state, so one shown again, or moved to another

@@ -1,10 +1,12 @@
 //! The Settings tab (Bolt's `SettingsTab`, opened by `settings`), with the
-//! two of Bolt's settings this shell uses: Open in New Column, and the
-//! keybindings file.
+//! settings this shell uses: Open in New Column, the agent command, and
+//! the keybindings file.
 
+use nsh_base::input;
 use nsh_core::prelude::*;
 
 use crate::{
+    hub::engine::fleet::{self, DEFAULT_AGENT_COMMAND},
     keybindings,
     state::Shell,
     theme::{BOLT_THEME, lighten},
@@ -34,6 +36,15 @@ pub fn settings_view(shell: Shell) -> AnyElement {
                         shell.update_settings(|s| {
                             s.extra.insert("openInNewColumn".into(), on.into());
                         });
+                    }),
+                ))
+                .child(view().h(px(24.0)))
+                .child(category("Agents"))
+                .child(row(
+                    "Agent command",
+                    "What startAgents and the hub type to start an agent session, before the prompt. Empty uses the default",
+                    text_field(fleet::agent_command_setting(shell).unwrap_or_default(), format!("{DEFAULT_AGENT_COMMAND} (default)"), move |command| {
+                        fleet::set_agent_command(shell, command)
                     }),
                 ))
                 .child(view().h(px(24.0)))
@@ -107,4 +118,47 @@ fn button(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElemen
         .hover(|s| s.bg(color(v.bg_hover)))
         .on_press(on_press)
         .child(text(label).text_xs().text_color(color(v.fg)))
+}
+
+/// Bolt's text setting: a one-line field, `placeholder` while empty. What
+/// is typed is saved on Enter, when the field loses focus, and when the
+/// tab closes; Escape puts back what was saved.
+fn text_field(value: String, placeholder: String, save: impl Fn(&str) + 'static) -> impl IntoElement {
+    let v = &BOLT_THEME.vars;
+    let saved = signal(value.clone());
+    let draft = signal(value);
+    let save = std::rc::Rc::new(move || {
+        let text = draft.get_untracked();
+        if text != saved.get_untracked() {
+            save(&text);
+            saved.set(text);
+        }
+    });
+    let (on_submit, on_blur) = (save.clone(), save.clone());
+    cleanup(move || save());
+    input()
+        .value(move || draft.get())
+        .on_change(move |t: &str| draft.set(t.to_owned()))
+        .submit_behavior(SubmitBehavior::Submit)
+        .on_submit(move |_: &str| on_submit())
+        .on_blur(move || on_blur())
+        .on_key_press(move |key: &str| {
+            if key == "Escape" {
+                draft.set(saved.get_untracked());
+            }
+        })
+        .auto_correct(false)
+        .auto_capitalize(AutoCapitalize::None)
+        .placeholder(placeholder)
+        .placeholder_color(color(v.fg_muted))
+        .text_color(color(v.fg))
+        .text_size(px(12.0))
+        .flex_shrink(0.0)
+        .w(px(160.0))
+        .px_2()
+        .py_1()
+        .rounded(px(4.0))
+        .border_1()
+        .border_color(color(v.border))
+        .bg(color(v.bg_widget))
 }

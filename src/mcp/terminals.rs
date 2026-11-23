@@ -73,8 +73,10 @@ fn start_agents(shell: Shell, args: &Value) -> ToolResult {
     if paths.is_empty() {
         return Err("paths is required: the workspace tab paths to start agents in.".into());
     }
-    let known: HashSet<String> = shell.settings.with_untracked(|s| s.tabs.iter().chain(&s.pinned).map(|t| t.path.trim_end_matches('/').to_owned()).collect());
-    let unknown: Vec<&str> = paths.iter().filter(|p| !known.contains(p.as_str())).map(String::as_str).collect();
+    // Each terminal opens at the tab's own path, as stored: getWorkspaceTabs and the terminal chips find a tab's terminals by that.
+    let tabs: Vec<String> = shell.settings.with_untracked(|s| s.tabs.iter().chain(&s.pinned).map(|t| t.path.clone()).collect());
+    let resolved: Vec<(&String, Option<&String>)> = paths.iter().map(|p| (p, tabs.iter().find(|t| t.trim_end_matches('/') == p))).collect();
+    let unknown: Vec<&str> = resolved.iter().filter(|(_, t)| t.is_none()).map(|(p, _)| p.as_str()).collect();
     if !unknown.is_empty() {
         return Err(format!("Not workspace tabs: {}. Nothing was started.", unknown.join(", ")));
     }
@@ -83,8 +85,8 @@ fn start_agents(shell: Shell, args: &Value) -> ToolResult {
     let command = if prompt.is_empty() { agent_command(shell) } else { format!("{} {}", agent_command(shell), shell_quote(prompt)) };
 
     let mut started: Vec<Value> = Vec::new();
-    for path in &paths {
-        let opened = open_workspace_terminal(shell, path).and_then(|sid| state::term_by_session(shell, &sid).map(|t| (sid, t.id)).ok_or_else(|| "the terminal closed".to_owned()));
+    for (path, tab) in resolved.into_iter().filter_map(|(p, t)| Some((p, t?))) {
+        let opened = open_workspace_terminal(shell, tab).and_then(|sid| state::term_by_session(shell, &sid).map(|t| (sid, t.id)).ok_or_else(|| "the terminal closed".to_owned()));
         match opened {
             Ok((session_id, id)) => {
                 queue_write(id, format!("{command}\r"), 0);

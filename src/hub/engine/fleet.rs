@@ -35,12 +35,36 @@ pub fn hub_members(shell: Shell) -> Vec<HubMember> {
     targets(shell).into_iter().flat_map(|t| t.members).collect()
 }
 
+/// The `settings.extra` key of the agent command `startAgents` and the
+/// hub type, and the command typed while it is unset.
+pub const AGENT_COMMAND_KEY: &str = "agentCommand";
+pub const DEFAULT_AGENT_COMMAND: &str = "c";
+
+/// `settings.agentCommand` as the user set it; `None` while it is unset
+/// or blank.
+pub fn agent_command_setting(shell: Shell) -> Option<String> {
+    shell.settings.with_untracked(|s| s.extra.get(AGENT_COMMAND_KEY).and_then(|v| v.as_str()).map(str::trim).filter(|c| !c.is_empty()).map(str::to_owned))
+}
+
 /// The agent command typed to start one (`settings.agentCommand || "c"`).
 pub fn agent_command(shell: Shell) -> String {
-    shell
-        .settings
-        .with_untracked(|s| s.extra.get("agentCommand").and_then(|v| v.as_str()).filter(|c| !c.is_empty()).map(str::to_owned))
-        .unwrap_or_else(|| "c".into())
+    agent_command_setting(shell).unwrap_or_else(|| DEFAULT_AGENT_COMMAND.into())
+}
+
+/// Sets `settings.agentCommand`; a blank one removes it, back to
+/// [`DEFAULT_AGENT_COMMAND`]. An unchanged one writes nothing.
+pub fn set_agent_command(shell: Shell, command: &str) {
+    let command = command.trim();
+    if agent_command_setting(shell).as_deref().unwrap_or("") == command {
+        return;
+    }
+    shell.update_settings(|s| {
+        if command.is_empty() {
+            s.extra.remove(AGENT_COMMAND_KEY);
+        } else {
+            s.extra.insert(AGENT_COMMAND_KEY.into(), command.into());
+        }
+    });
 }
 
 /// A new terminal in `cwd`, shown; its session id (`openWorkspaceTerminalAtom`).

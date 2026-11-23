@@ -1,7 +1,7 @@
 //! The `saveNote` tool (`handleSaveNote`, `noteSignature`, `noteFileName`,
-//! `signNote`, `writeNote`): writes a `.md` into the shared `bolt-notes`
-//! folder, signed with the caller's handle and repo, and nudges the notes
-//! strip to re-read it.
+//! `signNote`, `writeNote`): writes a rivet note, a `.md` in the
+//! `bolt-notes` folder shared with the Electron Bolt, signed with the
+//! caller's handle and repo, and nudges the notes strip to re-read it.
 
 use serde_json::Value;
 
@@ -144,7 +144,7 @@ async fn save_note(shell: Shell, args: &Value) -> ToolResult {
     let known: Vec<String> = mentions.iter().filter(|m| live.contains(m)).map(|m| format!("@{m}")).collect();
     let unknown: Vec<String> = mentions.iter().filter(|m| !live.contains(m)).map(|m| format!("@{m}")).collect();
     let mut out = format!(
-        "Saved bolt note {file_name} ({}), {}.",
+        "Saved rivet note {file_name} ({}), {}.",
         path.display(),
         match &from {
             Some(f) => format!("signed \"— from {f}\""),

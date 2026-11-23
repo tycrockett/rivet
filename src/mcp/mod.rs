@@ -10,8 +10,10 @@
 //! channel of its own, waited on as long as Bolt waits (10 s, 120 s a
 //! command for the palette's slow verbs).
 //!
-//! The tool schemas are Bolt's, verbatim (`tools.json`, dumped from
-//! `_handleToolsList`). The tools Rivet has nothing behind (selection,
+//! The tool schemas are Bolt's (`tools.json`, dumped from
+//! `_handleToolsList`), with Rivet's names where they differ: `startAgents`
+//! starts whatever agent the user's `agentCommand` is, and `saveNote`
+//! saves a rivet note. The tools Rivet has nothing behind (selection,
 //! diagnostics, the model canvas, graphs, boards, terminal transcripts,
 //! group sessions) stay listed and answer that they are not supported
 //! here; those it backs in part (the web tab tools) say what is missing.
