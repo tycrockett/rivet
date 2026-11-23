@@ -280,20 +280,32 @@ impl Loc {
     }
 }
 
-/// `useGitStatus`' `locStats`: lines added and removed since the branch's
-/// base (nothing on the default branch itself) and in the working tree,
-/// where untracked files count each of their lines as added. Whatever git
-/// can't say counts as zero.
+/// `useGitStatus`' `locStats`: lines added and removed since the branch
+/// left the default one (`origin/<default>`, else the local `<default>`;
+/// the nearest local branch only when neither resolves; nothing on the
+/// default branch itself) and in the working tree, where untracked files
+/// count each of their lines as added. Whatever git can't say counts as
+/// zero.
 pub fn loc_stats(dir: &str) -> Loc {
     let counts = |args: &[&str]| git(args, dir).map_or((0, 0), |stat| shortstat_counts(&stat));
     let default = default_branch(dir);
     let base = match current_branch(dir) {
-        Ok(current) if current != default => Some(base_branch(dir, &current, &default)),
+        Ok(current) if current != default => {
+            Some(default_ref(dir, &default).unwrap_or_else(|| base_branch(dir, &current, &default)))
+        }
         _ => None,
     };
     let committed = base.as_ref().map_or((0, 0), |base| counts(&["diff", "--shortstat", &format!("{base}...HEAD")]));
     let (tracked_adds, dels) = counts(&["diff", "--shortstat", "HEAD"]);
     Loc { committed, uncommitted: (tracked_adds + untracked_lines(dir), dels), base }
+}
+
+/// The ref a PR against `default` diffs from: `origin/<default>`, else the
+/// local `<default>`; none when neither names a commit.
+fn default_ref(dir: &str, default: &str) -> Option<String> {
+    [format!("origin/{default}"), default.to_owned()]
+        .into_iter()
+        .find(|r| git(&["rev-parse", "--verify", "--quiet", &format!("{r}^{{commit}}")], dir).is_ok())
 }
 
 /// [`find_base_branch`], kept while the directory, branch and HEAD stay
