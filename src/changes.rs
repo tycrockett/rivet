@@ -94,22 +94,23 @@ pub fn parse_range(spec: &str) -> Option<(String, String)> {
     spec.split_once("..").map(|(a, b)| (a.to_owned(), b.to_owned()))
 }
 
-/// `git status --porcelain` (v1) as changed files, a rename (`R  a -> b`)
-/// under its new path.
+/// `git status --porcelain -z` (v1) as changed files, a rename or copy
+/// (`R  b\0a\0`) under its new path. `-z` leaves paths unquoted, so ones
+/// with spaces or non-ASCII characters name the file on disk.
 pub fn parse_porcelain(out: &str) -> Vec<ChangedFile> {
-    out.lines()
-        .filter(|l| l.len() >= 4)
-        .map(|line| {
-            let mut chars = line.chars();
-            let (staged, unstaged) = (chars.next().unwrap_or(' '), chars.next().unwrap_or(' '));
-            let path = &line[3..];
-            let (old_path, path) = match path.split_once(" -> ") {
-                Some((from, to)) => (Some(from.to_owned()), to.to_owned()),
-                None => (None, path.to_owned()),
-            };
-            ChangedFile { path, old_path, staged, unstaged, additions: None, deletions: None }
-        })
-        .collect()
+    let mut entries = out.split('\0');
+    let mut files = Vec::new();
+    while let Some(entry) = entries.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let mut chars = entry.chars();
+        let (staged, unstaged) = (chars.next().unwrap_or(' '), chars.next().unwrap_or(' '));
+        let path = entry[3..].to_owned();
+        let old_path = [staged, unstaged].iter().any(|c| matches!(c, 'R' | 'C')).then(|| entries.next().map(str::to_owned)).flatten();
+        files.push(ChangedFile { path, old_path, staged, unstaged, additions: None, deletions: None });
+    }
+    files
 }
 
 /// `git diff --name-status` / `diff-tree --name-status` as changed files,
@@ -173,7 +174,7 @@ fn load(dir: &str, spec: Option<&str>) -> Result<Listing, String> {
     let mode = resolve(dir, spec);
     let files = match &mode {
         Mode::Working => {
-            let mut files = parse_porcelain(&git::git(&["status", "--porcelain"], dir)?);
+            let mut files = parse_porcelain(&git::git(&["status", "--porcelain", "-z"], dir)?);
             // No HEAD yet (a first commit): no counts.
             if let Ok(stat) = git::git(&["diff", "HEAD", "--numstat"], dir) {
                 apply_numstat(&mut files, &stat);
@@ -225,9 +226,11 @@ fn sides(dir: &str, mode: &Mode, file: &ChangedFile) -> (String, String) {
 
 /// The working tree's state, cheaply: `git status`, and the size and
 /// modification time of each file it lists, so an edit to an already
-/// changed file counts too. When it changes, the tab loads again.
+/// changed file counts too. `-uall` lists each file of an untracked
+/// directory, whose own mtime moves only when an entry is added or removed.
+/// When it changes, the tab loads again.
 pub fn fingerprint(dir: &str) -> String {
-    let status = git::git(&["status", "--porcelain"], dir).unwrap_or_default();
+    let status = git::git(&["status", "--porcelain", "-z", "-uall"], dir).unwrap_or_default();
     let mut print = status.clone();
     for file in parse_porcelain(&status) {
         if let Ok(meta) = std::fs::metadata(std::path::Path::new(dir).join(&file.path)) {
@@ -607,11 +610,11 @@ mod tests {
 
     #[test]
     fn porcelain_keeps_both_columns_and_renames_under_their_new_path() {
-        let files = parse_porcelain("MM a.rs\n?? new.txt\nR  old.rs -> moved.rs\n D gone.rs\n");
+        let files = parse_porcelain("MM a.rs\0?? new file.txt\0R  moved.rs\0old.rs\0 D gone.rs\0");
         assert_eq!(files.len(), 4);
         assert!(files[0].is_staged() && files[0].is_unstaged());
         assert!(!files[1].is_staged() && files[1].is_unstaged());
-        assert_eq!(files[1].status().0, 'U');
+        assert_eq!((files[1].path.as_str(), files[1].status().0), ("new file.txt", 'U'));
         assert_eq!((files[2].path.as_str(), files[2].old_path.as_deref()), ("moved.rs", Some("old.rs")));
         assert!(files[3].is_deleted() && !files[3].is_staged());
     }

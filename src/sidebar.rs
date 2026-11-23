@@ -8,7 +8,12 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    path::Path,
     rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -1148,18 +1153,21 @@ fn footer(shell: Shell) -> impl IntoElement {
         })
 }
 
-/// How often the footer looks for a new directory or branch to count, and
-/// how often it looks at the working tree and HEAD (as the Changes tab
-/// does).
+/// How often the footer looks for a new directory or branch to count and
+/// at whether the watcher saw a change (a flag; no git), and how often it
+/// looks at the working tree and HEAD when the directory couldn't be
+/// watched.
 const LOC_TICK: Duration = Duration::from_millis(250);
 const LOC_POLL: Duration = Duration::from_secs(2);
 
 /// The current directory's line counts (`useGitStatus`' `locStats`), with
 /// the directory they were counted for. Counted again when the directory
-/// or its branch changes, and when its working tree or HEAD does (Bolt
-/// watches the directory; this looks every [`LOC_POLL`]). A directory that
-/// isn't a repo is never counted. The counts of the directory left stay
-/// until the new one's land, which the footer shows as counting.
+/// or its branch changes, and when its working tree or HEAD does: a file
+/// watcher ([`watch`]) flags each change, looked at every [`LOC_TICK`]; a
+/// directory it can't watch is looked at every [`LOC_POLL`] instead. A
+/// directory that isn't a repo is never counted. The counts of the
+/// directory left stay until the new one's land, which the footer shows as
+/// counting.
 fn loc_counts(shell: Shell) -> Signal<Option<(String, git::Loc)>> {
     let counts = signal(None::<(String, git::Loc)>);
     let task = spawn(async move {
@@ -1167,11 +1175,21 @@ fn loc_counts(shell: Shell) -> Signal<Option<(String, git::Loc)>> {
         // at the last count.
         let mut seen: Option<(String, String, String)> = None;
         let mut looked: Option<Instant> = None;
+        // The directory watched, and its watcher (none when watching failed).
+        let mut watching: Option<(String, Option<notify::RecommendedWatcher>)> = None;
+        let changed = Arc::new(AtomicBool::new(false));
         loop {
             let dir = shell.directory_untracked();
             if let Some(branch) = shell.statuses.with_untracked(|m| m.get(&dir).map(|s| s.branch.clone())) {
+                if watching.as_ref().is_none_or(|(d, _)| *d != dir) {
+                    drop(watching.take());
+                    let (at, flag) = (dir.clone(), changed.clone());
+                    watching = Some((dir.clone(), git::off_thread(move || watch(&at, flag)).await));
+                }
+                let watched = watching.as_ref().is_some_and(|(_, w)| w.is_some());
                 let moved = seen.as_ref().is_none_or(|(d, b, _)| *d != dir || *b != branch);
-                if moved || looked.is_none_or(|t| t.elapsed() >= LOC_POLL) {
+                let touched = changed.swap(false, Ordering::Relaxed);
+                if moved || touched || (!watched && looked.is_none_or(|t| t.elapsed() >= LOC_POLL)) {
                     looked = Some(Instant::now());
                     let at = dir.clone();
                     let print = git::off_thread(move || {
@@ -1193,6 +1211,39 @@ fn loc_counts(shell: Shell) -> Signal<Option<(String, git::Loc)>> {
     });
     cleanup(move || task.cancel());
     counts
+}
+
+/// Watches `dir` and everything under it, and its git directories where
+/// they live elsewhere (a linked worktree's), raising `changed` on each
+/// event that can move its line counts: anything in the working tree, and
+/// in a git directory the index, HEAD and refs (a stage, commit or
+/// checkout). The rest of git's files and reads are left out, so the
+/// counting's own git calls don't keep raising it. None when the watch
+/// can't be set up.
+fn watch(dir: &str, changed: Arc<AtomicBool>) -> Option<notify::RecommendedWatcher> {
+    use notify::Watcher;
+    let counts = |path: &Path| {
+        let mut parts = path.components().map(|c| c.as_os_str());
+        if !parts.by_ref().any(|p| p == ".git") {
+            return true;
+        }
+        let named = path.file_name().is_some_and(|n| n == "index" || n == "HEAD" || n == "packed-refs");
+        named || parts.any(|p| p == "refs")
+    };
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let Ok(event) = event else { return };
+        if event.need_rescan() || (!event.kind.is_access() && (event.paths.is_empty() || event.paths.iter().any(|p| counts(p)))) {
+            changed.store(true, Ordering::Relaxed);
+        }
+    })
+    .ok()?;
+    let root = Path::new(dir);
+    watcher.watch(root, notify::RecursiveMode::Recursive).ok()?;
+    let git_dirs = git::git(&["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], dir).unwrap_or_default();
+    for git_dir in git_dirs.lines().map(Path::new).filter(|d| !d.starts_with(root)) {
+        watcher.watch(git_dir, notify::RecursiveMode::Recursive).ok()?;
+    }
+    Some(watcher)
 }
 
 /// `SidebarFooter`'s line count: `+added / -deleted` since the branch's

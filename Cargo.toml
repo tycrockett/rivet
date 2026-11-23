@@ -16,6 +16,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 dirs = "6"
 libc = "0.2"
 tokio = { version = "1", features = ["sync"] }
+notify = "9.0.0"
 
 # `cargo run` builds NSH's layout, text and renderer with the app; unoptimized
 # they make every frame slow (a palette's rows appear late, a column drag
