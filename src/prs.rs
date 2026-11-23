@@ -192,13 +192,17 @@ impl Pr {
         }
     }
 
-    /// `reviewLabel`, capitalized for the bar.
-    pub fn review_label(&self) -> &'static str {
+    /// `reviewLabel`, capitalized for the bar; an approval names who gave
+    /// it: `Approved - a, b`.
+    pub fn review_label(&self) -> String {
         match self.review_decision.as_deref() {
-            Some("APPROVED") => "Approved",
-            Some("CHANGES_REQUESTED") => "Changes requested",
-            Some("REVIEW_REQUIRED") => "Review required",
-            _ => "No reviews",
+            Some("APPROVED") => {
+                let approvers: Vec<String> = self.reviewers().into_iter().filter(|(_, s)| s == "APPROVED").map(|(l, _)| l).collect();
+                if approvers.is_empty() { "Approved".to_owned() } else { format!("Approved - {}", approvers.join(", ")) }
+            }
+            Some("CHANGES_REQUESTED") => "Changes requested".to_owned(),
+            Some("REVIEW_REQUIRED") => "Review required".to_owned(),
+            _ => "No reviews".to_owned(),
         }
     }
 
@@ -498,6 +502,16 @@ mod tests {
             {"author":{"login":"a"},"state":"APPROVED","submittedAt":"2026-11-20T10:00:00Z"},
             {"author":{"login":"a"},"state":"COMMENTED","submittedAt":"2026-11-20T11:00:00Z"}]}"#);
         assert_eq!(pr.reviewers(), vec![("a".to_owned(), "APPROVED".to_owned())]);
+    }
+
+    #[test]
+    fn an_approval_names_each_reviewer_still_approving() {
+        let pr = pr(r#"{"number":1,"title":"t","url":"u","state":"OPEN","reviewDecision":"APPROVED","reviews":[
+            {"author":{"login":"a"},"state":"APPROVED","submittedAt":"2026-11-20T09:00:00Z"},
+            {"author":{"login":"b"},"state":"APPROVED","submittedAt":"2026-11-20T10:00:00Z"},
+            {"author":{"login":"c"},"state":"APPROVED","submittedAt":"2026-11-20T10:30:00Z"},
+            {"author":{"login":"c"},"state":"DISMISSED","submittedAt":"2026-11-20T11:00:00Z"}]}"#);
+        assert_eq!(pr.review_label(), "Approved - a, b");
     }
 
     #[test]

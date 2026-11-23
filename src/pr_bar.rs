@@ -8,7 +8,8 @@
 //!
 //! The detail is three `gh` round trips ([`prs::fetch_detail`]), asked for
 //! the current workspace only: when its git state is read again (a switch,
-//! each command), every 15 s while checks run, and every minute otherwise.
+//! each command), every 15 s while checks run, every minute otherwise, and
+//! on a press of the bar's refresh button.
 
 use std::{
     cell::RefCell,
@@ -48,6 +49,11 @@ pub struct PrBar {
     owner: Owner,
     /// Each workspace's PR as last fetched, with the branch it was asked for.
     cache: Signal<HashMap<String, (String, Option<Detail>)>>,
+    /// The workspaces with a fetch out: one swallows the next asks, and the
+    /// refresh button shows it.
+    asking: Signal<HashSet<String>>,
+    /// Bumped by the refresh button: the asking effect reads it.
+    refresh: Signal<u64>,
     /// A PR merged from here: the next fetch finds no open PR, so it shows
     /// from this copy until dismissed or the workspace changes.
     merged: Signal<Option<(String, Detail)>>,
@@ -79,6 +85,8 @@ pub fn provide(shell: Shell) -> PrBar {
         shell,
         owner: Owner::current(),
         cache,
+        asking: signal(HashSet::new()),
+        refresh: signal(0),
         merged,
         shown,
         open: signal(false),
@@ -118,23 +126,26 @@ impl PrBar {
     }
 
     fn poll(self) {
-        let (shell, cache) = (self.shell, self.cache);
-        // An ask already out for a workspace swallows the next ones: the
-        // git state is read again in bursts.
-        let asking: Rc<RefCell<HashSet<String>>> = Rc::default();
+        let (shell, cache, asking, refresh) = (self.shell, self.cache, self.asking, self.refresh);
         // The bar's owner, not the asking effect's: the effect runs again
         // on every git state read, which would cancel a fetch in flight and
         // leave its workspace in `asking` for good.
         let owner = self.owner;
         let ask = Rc::new(move |dir: String, branch: String| {
-            if !asking.borrow_mut().insert(dir.clone()) {
+            // An ask already out for a workspace swallows the next ones: the
+            // git state is read again in bursts.
+            if asking.with_untracked(|a| a.contains(&dir)) {
                 return;
             }
-            let asking = asking.clone();
+            asking.update(|a| {
+                a.insert(dir.clone());
+            });
             owner.run(|| spawn(async move {
                 let at = dir.clone();
                 let detail = git::off_thread(move || prs::fetch_detail(&at)).await;
-                asking.borrow_mut().remove(&dir);
+                asking.update(|a| {
+                    a.remove(&dir);
+                });
                 cache.update(|m| {
                     m.insert(dir, (branch, detail));
                 });
@@ -146,8 +157,10 @@ impl PrBar {
         };
         {
             let ask = ask.clone();
-            // Every read of the git state, the current workspace's or not.
+            // Every read of the git state, the current workspace's or not,
+            // and each press of the refresh button.
             effect(move || {
+                refresh.get();
                 if let Some((dir, branch)) = current() {
                     untracked(|| ask(dir, branch));
                 }
@@ -221,15 +234,17 @@ impl PrBar {
     }
 }
 
-/// The bar, and the dialog while open.
+/// The bar, and the dialog while open or going.
 pub fn bar(bar: PrBar) -> impl IntoElement {
+    let open = computed(move || bar.open.get() && bar.shown.with(Option::is_some));
+    let motion = DialogMotion::new(bar.owner, open);
     view()
         .flex_shrink(0.0)
         .child(dynamic(move || {
             let (detail, _) = bar.shown.get()?;
             Some(untracked(|| line(bar, &detail)))
         }))
-        .child(when(move || bar.open.get() && bar.shown.with(Option::is_some), move || dialog(bar)))
+        .child(when(motion.mounted, move || dialog(bar, motion)))
 }
 
 fn line(bar: PrBar, d: &Detail) -> View {
@@ -244,6 +259,13 @@ fn line(bar: PrBar, d: &Detail) -> View {
         .px_2()
         .overflow_hidden()
         .on_press(move || bar.open.set(true))
+        // The title gives way first: the segments keep their size.
+        .child(
+            view()
+                .flex_shrink(1.0)
+                .min_w(px(0.0))
+                .child(text(d.pr.title.clone()).text_size(px(12.0)).font_weight(FontWeight::MEDIUM).number_of_lines(1).text_color(rgb(v.fg))),
+        )
         .child(seg("⑂", v.accent, vec![(format!("#{}", d.pr.number), v.fg)]));
     view()
         .flex_row()
@@ -255,9 +277,31 @@ fn line(bar: PrBar, d: &Detail) -> View {
         .bg(rgb(BOLT_THEME.chrome()))
         .border_b_1()
         .border_color(rgb(v.border))
+        .child(refresh_button(bar))
         .child(states(summary, d))
         .child(merge_error(bar).max_w(px(360.0)))
         .child(controls(bar))
+}
+
+/// `↻`, `…` while the current workspace's PR is being asked for.
+fn refresh_button(bar: PrBar) -> View {
+    let v = &BOLT_THEME.vars;
+    let loading = move || {
+        let dir = bar.shell.directory();
+        bar.asking.with(|a| a.contains(&dir))
+    };
+    view()
+        .flex_shrink(0.0)
+        .items_center()
+        .justify_center()
+        .w(px(22.0))
+        .h(px(22.0))
+        .ml_2()
+        .rounded(px(4.0))
+        .hover(|s| s.bg(rgb(v.bg_hover)))
+        .on_press(move || bar.refresh.update(|n| *n += 1))
+        .child(text(move || if loading() { "…" } else { "↻" }).text_size(px(12.0)).font_family(MONO).text_color(rgb(v.fg_muted)))
+        .tooltip(tip("Refresh the pull request"))
 }
 
 /// The checks, the review, the comments, conflicts and draft: the bar's
@@ -266,7 +310,7 @@ fn states(row: View, d: &Detail) -> View {
     let pr = &d.pr;
     let muted = BOLT_THEME.vars.fg_muted;
     row.child(checks_seg(pr.check_counts()))
-        .child(seg("◉", review_color(pr), vec![(pr.review_label().to_owned(), BOLT_THEME.vars.fg)]))
+        .child(seg("◉", review_color(pr), vec![(pr.review_label(), BOLT_THEME.vars.fg)]))
         .child(comments_seg(d.counts()))
         .when(pr.mergeable == "CONFLICTING", |r| r.child(seg("⚠", red(), vec![("Conflicts".into(), red())])))
         .when(pr.is_draft, |r| r.child(seg("◇", muted, vec![("Draft".into(), muted)])))
@@ -373,8 +417,13 @@ fn controls(bar: PrBar) -> AnyElement {
                 row.child(mono("✓ merged", GREEN))
                     .child(
                         button("clean up", false, true, move || {
+                            // The bar's owner: dismissing redraws this button,
+                            // which would cancel the command it spawned. The
+                            // PR's branch by name: after gh's own local delete
+                            // the checkout stands on the default branch.
+                            let branch = d.pr.head_ref_name.clone();
+                            bar.owner.run(|| commands::submit(bar.shell, format!("delete {branch}")));
                             bar.merged.set(None);
-                            commands::submit(bar.shell, "delete".into());
                         })
                         .tooltip(tip("Remove the worktree, delete the branch and close its workspace tab")),
                     )
@@ -400,20 +449,105 @@ fn controls(bar: PrBar) -> AnyElement {
     })
 }
 
-fn dialog(bar: PrBar) -> impl IntoElement {
+/// How long the dialog takes to come in and to go (`nsh_base::sheet`'s).
+const DIALOG_IN_MS: f32 = 280.0;
+const DIALOG_OUT_MS: f32 = 200.0;
+
+/// The dialog's own motion, as `nsh_base::sheet` makes its own: the
+/// modal layer moves as one, so its slide would carry the backdrop up with
+/// the panel. The backdrop fades while the panel slides down from above
+/// the window, and back; the dialog stays in the view until it went.
+#[derive(Clone, Copy)]
+struct DialogMotion {
+    /// In the view: while open, and while it goes.
+    mounted: Signal<bool>,
+    /// 0 gone, 1 there: the backdrop's opacity.
+    progress: AnimatedValue,
+    /// Where the panel starts: a window's height above its place.
+    away: AnimatedValue,
+    /// The panel's translation: `away` at 0, none at 1.
+    translate: AnimatedNode,
+    /// Only the latest close unmounts: opened again on its way out, it stays.
+    generation: Stored<u64>,
+}
+
+impl DialogMotion {
+    fn new(owner: Owner, open: Memo<bool>) -> Self {
+        let progress = animated_value(0.0);
+        let away = animated_value(0.0);
+        let motion = Self {
+            mounted: signal(false),
+            progress,
+            away,
+            translate: away.mul(&progress.interpolate(&[0.0, 1.0], &[1.0, 0.0])),
+            generation: stored(0),
+        };
+        effect(move || {
+            let open = open.get();
+            untracked(|| motion.follow(owner, open));
+        });
+        motion
+    }
+
+    fn follow(self, owner: Owner, open: bool) {
+        let generation = self.generation.get().wrapping_add(1);
+        self.generation.replace(generation);
+        if open {
+            if !self.mounted.get() {
+                self.progress.set(0.0);
+                self.away.set(-window().height.0);
+                self.mounted.set(true);
+            }
+            if reduce_motion() {
+                self.progress.set(1.0);
+            } else {
+                let _ = self.progress.timing(1.0, DIALOG_IN_MS, Easing::EaseOut);
+            }
+        } else if self.mounted.get() {
+            if reduce_motion() {
+                self.mounted.set(false);
+                return;
+            }
+            let end = self.progress.timing(0.0, DIALOG_OUT_MS, Easing::EaseIn);
+            let (mounted, latest) = (self.mounted, self.generation);
+            let gone = move || {
+                if latest.get() == generation {
+                    mounted.set(false);
+                }
+            };
+            // The bar's owner: this effect's run ends with the next change.
+            // Gone when the motion ends, or after its time if no end is
+            // reported.
+            owner.run(|| {
+                spawn(async move {
+                    if end.await {
+                        gone();
+                    }
+                });
+                set_timeout(Duration::from_millis(DIALOG_OUT_MS as u64), gone);
+            });
+        }
+    }
+}
+
+fn dialog(bar: PrBar, motion: DialogMotion) -> impl IntoElement {
     let close = move || bar.open.set(false);
     nsh_base::dialog()
         .label("Pull request")
+        .animation(ModalAnimation::None)
         .close_on_escape(false)
         .close_on_swipe(false)
         .on_cancel(close)
+        .child(view().absolute().inset_0().bg(rgba(0x00000099)).bind_opacity(&motion.progress).on_press(close))
         .child(
+            // Presses beside the panel reach the backdrop.
             view()
                 .absolute()
                 .inset_0()
                 .items_center()
                 .justify_center()
-                .child(view().absolute().inset_0().bg(rgba(0x00000099)).on_press(close))
+                .pointer_events(PointerEvents::BoxNone)
+                .bind_translate_y(&motion.translate)
                 .child(dynamic(move || {
                     let (detail, _) = bar.shown.get()?;
                     Some(untracked(|| panel(bar, detail)))
