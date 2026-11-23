@@ -949,30 +949,33 @@ pub fn choice_card(hub: Hub, entry: &HubEntry) -> AnyElement {
     c.into_element()
 }
 
-const FINDER_HELP: &str =
-    "folder name or cd <path> · .. · ~ · mkdir <name> · tab [<folder>] · bm <name> · bm add|rm <name> · exit";
+/// A closed finder in the thread; an open one sits on the input
+/// ([`finder_panel`]).
+pub fn finder_card(shell: Shell) -> AnyElement {
+    card(false)
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py(px(10.0))
+                .child(chip("▸", "finder closed", rgb(FG)))
+                .child(text(move || shell.settings.with(|s| s.directory.clone())).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted())),
+        )
+        .into_element()
+}
 
-/// The folders of the current directory, filtered by what the input says,
-/// and the bookmarks; a click goes there.
-pub fn finder_card(
-    shell: Shell,
-    hub: Hub,
-    entry: &HubEntry,
-    folders: Signal<Vec<String>>,
-    go: Rc<dyn Fn(Vec<String>)>,
-) -> AnyElement {
-    let HubEntry::Finder { done, n, .. } = entry else {
-        return view().into_element();
-    };
-    let (done, n) = (*done, *n);
+/// The open finder, joined to the top of the input: the folders of the
+/// current directory, filtered by what the input says, and the bookmarks;
+/// a click goes there. Made again for each `n`, so a bump re-reads them.
+pub fn finder_panel(shell: Shell, hub: Hub, folders: Signal<Vec<String>>, go: Rc<dyn Fn(Vec<String>)>) -> AnyElement {
     let dir_of = move || shell.settings.with(|s| s.directory.clone());
     effect(move || {
         let dir = dir_of();
-        let _ = n;
-        if dir.is_empty() || done {
-            return;
+        if !dir.is_empty() {
+            folders.set(read_folders(&dir));
         }
-        folders.set(read_folders(&dir));
     });
     let query = hub.finder_query;
     let row = {
@@ -984,6 +987,7 @@ pub fn finder_card(
                 .flex_row()
                 .items_center()
                 .min_w(px(0.0))
+                .rounded(px(6.0))
                 .hover(|s| s.bg(rgba(0xffffff1a)))
                 .child(
                     view()
@@ -992,7 +996,7 @@ pub fn finder_card(
                         .flex_row()
                         .items_center()
                         .gap_2()
-                        .px_3()
+                        .px_2()
                         .py(px(4.0))
                         .on_press(move || a(vec![cd1.clone()]))
                         .child(text(icon).text_size(px(12.0)).text_color(muted()))
@@ -1003,7 +1007,7 @@ pub fn finder_card(
                 )
                 .child(
                     view()
-                        .mr_2()
+                        .mr_1()
                         .px(px(6.0))
                         .rounded(px(4.0))
                         .hover(|s| s.bg(rgba(0xffffff33)))
@@ -1013,30 +1017,26 @@ pub fn finder_card(
         }
     };
     let marks: Vec<(String, String)> = shell.settings.with_untracked(|s| s.bookmarks.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-    let mut c = card(false).child(
-        view()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .px_3()
-            .pt(px(10.0))
-            .pb_2()
-            .child(chip("▸", if done { "finder closed" } else { "finder" }, if done { rgb(FG) } else { rgb(FINDER_TONE) }))
-            .child(text(move || dir_of()).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted())),
-    );
-    if done {
-        return c.into_element();
-    }
     let shown = move || finder_matches(&folders.get(), &query.get());
-    c = c
-        .child(view().px_3().pb_2().child(text(FINDER_HELP).text_size(px(11.0)).line_height(px(20.0)).text_color(faint())))
+    let mut c = view()
+        .border_b_1()
+        .border_color(rgb(FINDER_TONE).opacity(0.35))
+        .pb_1()
         .child(
-            scroll().max_h(px(280.0)).border_t_1().border_color(line()).child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .px_2()
+                .pb(px(6.0))
+                .child(chip("▸", "finder", rgb(FINDER_TONE)).flex_shrink(0.0))
+                .child(text(move || dir_of()).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted())),
+        )
+        .child(
+            scroll().max_h(px(200.0)).child(
                 view()
-                    .flex_row()
-                    .flex_wrap()
                     .child(when(move || shown().is_empty(), move || {
-                        view().px_3().py(px(6.0)).child(
+                        view().px_2().py(px(6.0)).child(
                             text(move || {
                                 let q = query.get();
                                 if q.is_empty() { "no folders".to_owned() } else { format!("no folders match {q}") }
@@ -1050,7 +1050,7 @@ pub fn finder_card(
                         move |name, _| {
                             let name = name.get_untracked();
                             let cd = format!("cd {}", serde_json::to_string(&name).unwrap_or_default());
-                            view().w(px(140.0)).child(row(name, cd, None, "📁"))
+                            row(name, cd, None, "📁")
                         }
                     })),
             ),
@@ -1061,7 +1061,7 @@ pub fn finder_card(
             let cd = format!("cd {} --absolute", serde_json::to_string(&path).unwrap_or_default());
             list = list.child(row(name, cd, Some(path), "🔖"));
         }
-        c = c.child(scroll().max_h(px(200.0)).border_t_1().border_color(line()).child(list));
+        c = c.child(scroll().max_h(px(120.0)).mt_1().pt_1().border_t_1().border_color(line()).child(list));
     }
     c.into_element()
 }

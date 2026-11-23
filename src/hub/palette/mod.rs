@@ -12,7 +12,7 @@ use nsh_core::prelude::*;
 use std::time::Duration;
 
 use self::{
-    cards::{FG, FINDER_TONE, chip, faint, mix, muted},
+    cards::{FG, FINDER_TONE, faint, mix, muted},
     editor::{Editor, Item, editor},
 };
 use crate::{
@@ -647,11 +647,12 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
         cleanup(move || ticker.cancel());
     });
 
-    // The thread's last entries.
-    let shown = move || hub.thread.with(|t| t[t.len().saturating_sub(SHOWN)..].to_vec());
-    let empty = move || hub.thread.with(Vec::is_empty);
+    // The thread's last entries; an open finder sits on the input instead.
+    let open = |e: &HubEntry| matches!(e, HubEntry::Finder { done: false, .. });
+    let shown = move || hub.thread.with(|t| t[t.len().saturating_sub(SHOWN)..].iter().filter(|e| !open(e)).cloned().collect::<Vec<_>>());
+    let empty = move || hub.thread.with(|t| t.iter().all(open));
 
-    // The user's latest line or finder sits at the top of the log: its
+    // The user's latest line sits at the top of the log: its
     // position is learned from its layout. Until the log has scrolled there
     // on opening it stays hidden: its first frame would show it scrolled
     // elsewhere, and the rows would seem to blink in.
@@ -668,7 +669,6 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
         let mine = hub.thread.with(|t| {
             t.iter().rev().find_map(|e| match e {
                 HubEntry::Say { id, from, .. } if from == ME => Some(id.clone()),
-                HubEntry::Finder { id, .. } => Some(id.clone()),
                 _ => None,
             })
         });
@@ -713,7 +713,7 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
             .child(dynamic(move || {
                 let e = kind();
                 let env = env.clone();
-                untracked(|| row(&env, handle_of, now, folders, &e))
+                untracked(|| row(&env, handle_of, now, &e))
             }))
     });
 
@@ -721,15 +721,31 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
     let (from, to) = (mix(color, 0x000000, 0.45), mix(color, 0x000000, 0.80));
     let close = move || hub.palette.set(None);
     let can_send = move || said.get().1;
-    // While a finder is open the line goes to it: the header says so, and
-    // the input is framed in the finder's color.
-    let in_finder = {
+    // While a finder is open the line goes to it: the finder sits on top of
+    // the input, both framed in the finder's color. Made again for each
+    // bump (`n`), which re-reads the folders.
+    let finder_n = {
         let env = env.clone();
-        computed(move || env.open_finder().is_some())
+        computed(move || env.open_finder().map(|(_, n)| n))
     };
+    let in_finder = computed(move || finder_n.get().is_some());
     let placeholder = computed(move || {
-        if in_finder.get() { "folder name, cd <path>, .., ~, mkdir, tab, bm · exit leaves the finder" } else { "/command, @handle message, #script, :keyword, or a shell command" }
+        if in_finder.get() { "folder name, cd <path>, .. or exit" } else { "/command, @handle message, #script, :keyword, or a shell command" }
     });
+    let finder = {
+        let env = env.clone();
+        dynamic(move || {
+            let open = finder_n.get().is_some();
+            let env = env.clone();
+            untracked(move || {
+                if !open {
+                    return view().into_element();
+                }
+                let go: Rc<dyn Fn(Vec<String>)> = Rc::new(move |cmds| env.navigate(cmds, None));
+                cards::finder_panel(shell, hub, folders, go)
+            })
+        })
+    };
 
     let send_env = env.clone();
     let enter_env = env.clone();
@@ -766,7 +782,6 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(rgba(0xffffffb3)),
                 )
-                .child(when(move || in_finder.get(), || chip("▸", "finder", rgb(FINDER_TONE)).flex_shrink(0.0)))
                 .child(
                     text(move || self_path.get().unwrap_or_default())
                         .flex_1()
@@ -824,6 +839,7 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                 .bg(move || if in_finder.get() { mix(FINDER_TONE, 0x000000, 0.25).opacity(0.6) } else { rgba(0x00000059) })
                 .border_1()
                 .border_color(move || if in_finder.get() { rgb(FINDER_TONE).opacity(0.7) } else { rgba(0x00000000) })
+                .child(finder)
                 .child(editor(Editor {
                     value: typed,
                     commands: menu,
@@ -879,7 +895,7 @@ fn unix_now() -> f64 {
 }
 
 /// One entry of the thread as its card.
-fn row(env: &Rc<Env>, handle_of: Memo<HashMap<String, String>>, now: Signal<f64>, folders: Signal<Vec<String>>, e: &HubEntry) -> AnyElement {
+fn row(env: &Rc<Env>, handle_of: Memo<HashMap<String, String>>, now: Signal<f64>, e: &HubEntry) -> AnyElement {
     let hub = env.hub;
     match e {
         HubEntry::Job { .. } => cards::job_card(hub, e, now),
@@ -893,11 +909,7 @@ fn row(env: &Rc<Env>, handle_of: Memo<HashMap<String, String>>, now: Signal<f64>
             cards::result_card(shell, e, run)
         }
         HubEntry::Choice { .. } => cards::choice_card(hub, e),
-        HubEntry::Finder { .. } => {
-            let env = env.clone();
-            let go: Rc<dyn Fn(Vec<String>)> = Rc::new(move |cmds| env.navigate(cmds, None));
-            cards::finder_card(hub.shell, hub, e, folders, go)
-        }
+        HubEntry::Finder { .. } => cards::finder_card(hub.shell),
         HubEntry::Spawn { handle, cwd, session_id, .. } => {
             let (cwd, session) = (cwd.clone(), session_id.clone());
             view()
