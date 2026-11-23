@@ -1,5 +1,5 @@
 //! Bolt's pty daemon (`src/ptyd/daemon.js`), so terminals outlive the app:
-//! this executable run as `--ptyd` owns every PTY, with the scrollback ring
+//! this executable run as `--ptyd` ([`ENTRY`]) owns every PTY, with the scrollback ring
 //! and last-output time the app asks for when it comes back. Unlike Bolt's
 //! client, a launch does not restart the daemon: surviving a restart of the
 //! app is the point (`pty.rs` only replaces a daemon that speaks another
@@ -358,6 +358,36 @@ fn end_session(groups: Vec<i32>) {
     if escalate.is_err() {
         signal_groups(&groups, libc::SIGKILL);
     }
+}
+
+/// Where `--ptyd` becomes the daemon: among the executable's initializers,
+/// before any `main`. The executable is whatever links this crate: Rivet's
+/// own `main.rs`, or a `main` nsh generates for `nsh run`, `nsh test` and
+/// its dev host, which never look for `--ptyd` and would boot the whole
+/// app instead (windowless, in the Dock, never idling out). `pty.rs`
+/// refers to it so the linker keeps it.
+#[used]
+#[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
+#[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
+pub static ENTRY: extern "C" fn(libc::c_int, *const *const libc::c_char) = enter;
+
+/// dyld and glibc pass an initializer the process's `argc` and `argv`.
+extern "C" fn enter(argc: libc::c_int, argv: *const *const libc::c_char) {
+    // SAFETY: `argv` holds `argc` NUL-terminated strings.
+    if argc < 2 || unsafe { std::ffi::CStr::from_ptr(*argv.add(1)) } != c"--ptyd" {
+        return;
+    }
+    // What std's runtime does before `main`: a write to a client that went
+    // away fails rather than ending the daemon.
+    // SAFETY: setting a signal's disposition touches no memory.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
+    std::process::exit(match run() {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("rivet: pty daemon: {e}");
+            1
+        }
+    });
 }
 
 /// Runs the daemon until it idles out. Returns at once when another daemon

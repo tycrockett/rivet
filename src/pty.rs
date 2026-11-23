@@ -245,6 +245,8 @@ fn daemon_exe() -> io::Result<std::path::PathBuf> {
 /// parent is launchd from the start. Nothing that ends the app, its
 /// process group or its process tree reaches it.
 fn start_daemon() -> io::Result<()> {
+    // The daemon's way in; referring to it keeps it in the executable.
+    std::hint::black_box(&crate::ptyd::ENTRY);
     let exe = daemon_exe()?;
     let mut sh = Command::new("/bin/sh");
     sh.arg("-c")

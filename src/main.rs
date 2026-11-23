@@ -11,17 +11,6 @@ use nsh_platform_windows as platform;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn main() -> impl std::process::Termination {
-    // The pty daemon (`ptyd.rs`) is this executable, started by the app and
-    // outliving it: no window, no logger.
-    if std::env::args().nth(1).as_deref() == Some("--ptyd") {
-        return match rivet::ptyd::run() {
-            Ok(()) => std::process::ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("rivet: pty daemon: {e}");
-                std::process::ExitCode::FAILURE
-            }
-        };
-    }
     rivet::adopt_legacy_data_dir();
     env_logger::init();
     // No system title bar: the strip and the columns run to the window's
