@@ -1280,7 +1280,7 @@ fn loc_badge(loc: Option<git::Loc>) -> Option<AnyElement> {
 
 /// `SpinnerIcon` with `animate-spin`: a ring, one quarter bright, turning
 /// once a second until it goes.
-fn spinner(ring: u32, quarter: u32) -> View {
+pub(crate) fn spinner(ring: u32, quarter: u32) -> View {
     let angle = animated_value(0.0);
     let spin = Animation::timing(&angle, 360.0, Timing::new(1000.0, Easing::Linear)).looped(None);
     let _ = spin.start();

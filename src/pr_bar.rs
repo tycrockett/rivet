@@ -23,7 +23,7 @@ use nsh_core::{prelude::*, time::unix_ms};
 use crate::{
     commands, git,
     prs::{self, CheckCounts, CheckState, Comment, CommentCounts, Detail, Pr},
-    sidebar::format_age,
+    sidebar::{format_age, spinner},
     state::Shell,
     theme::BOLT_THEME,
 };
@@ -283,7 +283,7 @@ fn line(bar: PrBar, d: &Detail) -> View {
         .child(controls(bar))
 }
 
-/// `↻`, `…` while the current workspace's PR is being asked for.
+/// `↻`, a spinner while the current workspace's PR is being asked for.
 fn refresh_button(bar: PrBar) -> View {
     let v = &BOLT_THEME.vars;
     let loading = move || {
@@ -300,7 +300,13 @@ fn refresh_button(bar: PrBar) -> View {
         .rounded(px(4.0))
         .hover(|s| s.bg(rgb(v.bg_hover)))
         .on_press(move || bar.refresh.update(|n| *n += 1))
-        .child(text(move || if loading() { "…" } else { "↻" }).text_size(px(12.0)).font_family(MONO).text_color(rgb(v.fg_muted)))
+        .child(dynamic(move || {
+            if loading() {
+                spinner(v.fg_faint, v.fg_muted).into_element()
+            } else {
+                text("↻").text_size(px(12.0)).font_family(MONO).text_color(rgb(v.fg_muted)).into_element()
+            }
+        }))
         .tooltip(tip("Refresh the pull request"))
 }
 
@@ -322,14 +328,18 @@ fn mono(s: impl Into<SharedString>, c: u32) -> Text {
 
 /// A glyph and its words, which keep their size.
 fn seg(glyph: &str, glyph_color: u32, parts: Vec<(String, u32)>) -> View {
-    let row = view().flex_row().items_center().gap(px(5.0)).flex_shrink(0.0).child(mono(glyph.to_owned(), glyph_color));
+    icon_seg(mono(glyph.to_owned(), glyph_color), parts)
+}
+
+fn icon_seg(icon: impl IntoElement, parts: Vec<(String, u32)>) -> View {
+    let row = view().flex_row().items_center().gap(px(5.0)).flex_shrink(0.0).child(icon);
     parts.into_iter().fold(row, |r, (s, c)| r.child(mono(s, c)))
 }
 
 fn checks_seg(c: CheckCounts) -> View {
     let (fg, muted) = (BOLT_THEME.vars.fg, BOLT_THEME.vars.fg_muted);
     if c.running > 0 {
-        seg("◐", YELLOW, vec![(c.running.to_string(), fg), ("running".into(), muted)])
+        icon_seg(spinner(BOLT_THEME.vars.fg_faint, YELLOW), vec![(c.running.to_string(), fg), ("running".into(), muted)])
     } else if c.failed > 0 {
         seg("✗", red(), vec![(c.failed.to_string(), fg), ("failed".into(), muted)])
     } else if c.passed > 0 {
