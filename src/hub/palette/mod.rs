@@ -24,6 +24,7 @@ use crate::{
         targets as hub_targets,
     },
     state::Shell,
+    theme::BOLT_THEME,
 };
 
 /// How many of the thread's last entries show (`SHOWN`).
@@ -385,7 +386,7 @@ impl Env {
     }
 }
 
-/// The frame's colors: the current tab's `color`, else zinc.
+/// The send arrow's color: the current tab's `color`, else zinc.
 fn frame_color(shell: Shell) -> u32 {
     shell.settings.with_untracked(|s| {
         s.tabs
@@ -619,7 +620,6 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
     });
 
     let color = frame_color(shell);
-    let (from, to) = (mix(color, 0x000000, 0.45), mix(color, 0x000000, 0.80));
     let close = move || hub.palette.set(None);
     // While a finder is open the line goes to it: the finder sits on top of
     // the input, both framed in the finder's color. Made again for each
@@ -665,9 +665,10 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
         .p_3()
         .rounded(px(RADIUS))
         .shadow_2xl()
-        .bg_linear(deg(135.0))
-        .gradient_from(from)
-        .gradient_to(to)
+        .bg(rgb(BOLT_THEME.xterm.background))
+        // The terminal box's frame: `var(--theme-fg)` at 9%.
+        .border_1()
+        .border_color(rgb(BOLT_THEME.vars.fg).opacity(0.09))
         // Nothing drawn past the frame, however narrow the strip is dragged.
         .overflow_hidden()
         .child(
