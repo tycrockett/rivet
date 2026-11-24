@@ -515,12 +515,18 @@ impl Shell {
     }
 
     /// Opens a terminal in `cwd` and shows it (`openTerminalAtom`): in the
-    /// active column, or a new one after it with `openInNewColumn`.
+    /// active column, or a new one after it with `openInNewColumn`. One
+    /// opened in the current workspace takes the keys, even from the open
+    /// palette that ran it.
     pub fn open_terminal(&self, cwd: String) -> Result<u64, String> {
         let (pty, output) = Pty::spawn(&cwd).map_err(|e| format!("Could not start a shell: {e}"))?;
         let id = self.adopt(pty, output, &cwd, String::new(), unix_ms(), String::new());
         let new_column = self.opens_new_column();
+        let here = cwd == self.directory_untracked();
         self.columns.update(|c| c.entry(cwd).or_default().add(id, new_column));
+        if here {
+            self.focus_pending.set(true);
+        }
         Ok(id)
     }
 
