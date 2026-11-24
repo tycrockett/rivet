@@ -1,7 +1,10 @@
 //! The `saveNote` tool (`handleSaveNote`, `noteSignature`, `noteFileName`,
 //! `signNote`, `writeNote`): writes a rivet note, a `.md` in the
-//! `bolt-notes` folder shared with the Electron Bolt, signed with the
+//! `bolt-notes` folder shared with the Electron Bolt or, with `scope`
+//! "group", in the caller's group's notes folder; signs it with the
 //! caller's handle and repo, and nudges the notes strip to re-read it.
+
+use std::path::PathBuf;
 
 use serde_json::Value;
 
@@ -85,20 +88,13 @@ fn caller_terminal(shell: Shell, args: &Value) -> Option<String> {
 }
 
 /// `@handle · repo (branch)`, whatever of it can be found (`noteSignature`).
-async fn note_signature(shell: Shell, args: &Value) -> Option<String> {
-    let term = caller_terminal(shell, args);
-    let handle = term.as_ref().and_then(|id| {
+async fn note_signature(shell: Shell, term: Option<&str>, cwd: Option<String>) -> Option<String> {
+    let handle = term.and_then(|id| {
         hub::targets(shell)
             .into_iter()
             .find(|t| t.kind == TargetKind::Terminal && t.members[0].session_id.as_deref() == Some(id))
             .map(|t| t.handle)
     });
-    let given = trim_slash(args.get("cwd").and_then(Value::as_str).unwrap_or("")).to_owned();
-    let cwd = if !given.is_empty() {
-        Some(given)
-    } else {
-        term.and_then(|id| shell.terms.get_untracked().into_iter().find(|t| t.session_id == id).map(|t| t.cwd))
-    };
     let (repo, branch) = match cwd {
         Some(cwd) => git::off_thread(move || (git::repo_name(&cwd), git::current_branch(&cwd).unwrap_or_default())).await,
         None => (None, String::new()),
@@ -106,6 +102,21 @@ async fn note_signature(shell: Shell, args: &Value) -> Option<String> {
     let place = repo.map(|r| if branch.is_empty() { r } else { format!("{r} ({branch})") });
     let parts: Vec<String> = [handle.map(|h| format!("@{h}")), place].into_iter().flatten().collect();
     (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// The folder a note goes in, and its group when that is a group's:
+/// `scope` "group" is the caller's group, "global" the shared folder. Left
+/// out, a note the caller's group already has by that name is edited in
+/// place; anything else is global.
+fn note_folder(scope: Option<&str>, group: Option<(String, PathBuf)>, global: PathBuf, file_name: &str) -> Result<(PathBuf, Option<String>), String> {
+    match (scope.map(str::trim).filter(|s| !s.is_empty()), group) {
+        (Some("group"), Some((g, dir))) => Ok((dir, Some(g))),
+        (Some("group"), None) => Err("scope \"group\" needs your terminal to be in a tab of a Rivet group, and it is in none. Save it without scope.".into()),
+        (Some("global"), _) => Ok((global, None)),
+        (Some(other), _) => Err(format!("scope is \"global\" or \"group\", not \"{other}\".")),
+        (None, Some((g, dir))) if dir.join(file_name).is_file() => Ok((dir, Some(g))),
+        (None, _) => Ok((global, None)),
+    }
 }
 
 pub async fn call(shell: Shell, name: &str, args: &Value) -> Option<ToolResult> {
@@ -123,9 +134,20 @@ async fn save_note(shell: Shell, args: &Value) -> ToolResult {
         Some(t) if !t.trim().is_empty() => t.to_owned(),
         _ => return Err("text is required.".into()),
     };
-    let from = note_signature(shell, args).await;
+    let term = caller_terminal(shell, args);
+    let given = trim_slash(args.get("cwd").and_then(Value::as_str).unwrap_or("")).to_owned();
+    let term_cwd = term.as_ref().and_then(|id| shell.terms.get_untracked().into_iter().find(|t| &t.session_id == id).map(|t| t.cwd));
+    // The strip picks a terminal's group from the terminal's cwd, so that one decides here too.
+    let group = shell.settings.with_untracked(|s| {
+        let g = notes::group_at(s, term_cwd.as_deref().unwrap_or(&given))?;
+        let dir = notes::group_notes_dir(s, &g)?;
+        Some((g, dir))
+    });
+    let group_name = group.as_ref().map(|(g, _)| g.clone());
+    let (dir, saved_in) = note_folder(args.get("scope").and_then(Value::as_str), group, notes::notes_dir(), &file_name)?;
+    let from = note_signature(shell, term.as_deref(), if given.is_empty() { term_cwd } else { Some(given) }).await;
     let signed = sign_note(&text, from.as_deref());
-    let path = notes::notes_dir().join(&file_name);
+    let path = dir.join(&file_name);
     let written = {
         let path = path.clone();
         git::off_thread(move || {
@@ -143,8 +165,13 @@ async fn save_note(shell: Shell, args: &Value) -> ToolResult {
     let mentions = notes::mentions(notes::split_signature(&text).0);
     let known: Vec<String> = mentions.iter().filter(|m| live.contains(m)).map(|m| format!("@{m}")).collect();
     let unknown: Vec<String> = mentions.iter().filter(|m| !live.contains(m)).map(|m| format!("@{m}")).collect();
+    let scope = match (&saved_in, &group_name) {
+        (Some(g), _) => format!("for the terminals of group {g}"),
+        (None, Some(g)) => format!("for every terminal (scope \"group\" keeps it to group {g})"),
+        (None, None) => "for every terminal".to_owned(),
+    };
     let mut out = format!(
-        "Saved rivet note {file_name} ({}), {}.",
+        "Saved rivet note {file_name} {scope} ({}), {}.",
         path.display(),
         match &from {
             Some(f) => format!("signed \"— from {f}\""),
@@ -158,4 +185,27 @@ async fn save_note(shell: Shell, args: &Value) -> ToolResult {
         out.push_str(&format!(" No open terminal or workspace answers to {}; getWorkspaceTabs lists the handles.", unknown.join(", ")));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_note_is_global_unless_asked_for_the_group_or_already_there() {
+        let dir = std::env::temp_dir().join(format!("rivet-note-folder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Kept.md"), "in the group").unwrap();
+        let group = || Some(("web".to_owned(), dir.clone()));
+        let global = PathBuf::from("/global");
+        let at = |scope, group, name| note_folder(scope, group, global.clone(), name);
+
+        assert_eq!(at(None, group(), "New.md").unwrap(), (global.clone(), None));
+        assert_eq!(at(None, group(), "Kept.md").unwrap(), (dir.clone(), Some("web".to_owned())));
+        assert_eq!(at(Some("group"), group(), "New.md").unwrap(), (dir.clone(), Some("web".to_owned())));
+        assert_eq!(at(Some("global"), group(), "Kept.md").unwrap(), (global.clone(), None));
+        assert!(at(Some("group"), None, "New.md").is_err());
+        assert!(at(Some("team"), group(), "New.md").is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

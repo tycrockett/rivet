@@ -724,7 +724,7 @@
   },
   {
     "name": "saveNote",
-    "description": "Save a rivet note: a markdown snippet the user keeps in Rivet and pastes into an agent session with one click, from the notes strip under the terminal. Use it when the user asks for a rivet note (\"create a handoff note as a rivet note\"); a bolt note is the same thing, in the same folder. The text is pasted verbatim into another session's prompt, so write it as the message that session should receive. Saving under a name that already exists replaces that note: that is how a note is edited.\n\nMENTIONS. When the user names the session the note is for, write its @handle in the text: `@backend/k3f9` for one terminal, `@backend` for every terminal in that workspace. That note is then highlighted in the strip under the mentioned terminal. getWorkspaceTabs gives each workspace's and terminal's handle; never guess one. The result says which mentions matched an open terminal.\n\nSIGNATURE. Rivet signs the note itself, appending a last line `— from @<your terminal> · <repo> (<branch>)`, found from your cwd and sessionId. Do not write one yourself; an edited note's old signature is replaced.",
+    "description": "Save a rivet note: a markdown snippet the user keeps in Rivet and pastes into an agent session with one click, from the notes strip under the terminal. Use it when the user asks for a rivet note (\"create a handoff note as a rivet note\"); a bolt note is the same thing, in the same folder. The text is pasted verbatim into another session's prompt, so write it as the message that session should receive. Saving under a name that already exists replaces that note: that is how a note is edited.\n\nSCOPE. A note is global by default: the strip under every terminal shows it. A Rivet group also has notes of its own, shown only under the terminals in that group's tabs. When your workspace is in a group (getWorkspaceTabs shows each tab's group), ask the user before saving which level the note belongs at: global (every terminal, the default) or the group, unless they already said; then pass scope \"group\" or leave scope out. Editing a note your group already has keeps it in the group without scope. The result says where it was saved.\n\nMENTIONS. When the user names the session the note is for, write its @handle in the text: `@backend/k3f9` for one terminal, `@backend` for every terminal in that workspace. That note is then highlighted in the strip under the mentioned terminal. getWorkspaceTabs gives each workspace's and terminal's handle; never guess one. The result says which mentions matched an open terminal.\n\nSIGNATURE. Rivet signs the note itself, appending a last line `— from @<your terminal> · <repo> (<branch>)`, found from your cwd and sessionId. Do not write one yourself; an edited note's old signature is replaced.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -743,6 +743,14 @@
         "sessionId": {
           "type": "string",
           "description": "Your agent session id, if you know it. Makes finding your terminal exact."
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "global",
+            "group"
+          ],
+          "description": "Where the note is saved: \"global\" (the default) for every terminal, \"group\" for only the terminals in your workspace's Rivet group. Ask the user which when your workspace is in a group."
         }
       },
       "required": [

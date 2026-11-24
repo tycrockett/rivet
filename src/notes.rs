@@ -1,12 +1,14 @@
 //! Rivet notes (Bolt's `notesStore`, `useNotesPoll`, `NotesStrip`): `.md`
 //! files in the Electron Bolt's `bolt-notes` folder, shared by every
 //! terminal and by both apps (so the folder keeps Bolt's name), and
-//! written by agents through the `saveNote` tool. Under an agent's terminal a
-//! strip shows one tile per note, newest edit first; a note that
-//! @mentions this terminal or its workspace is outlined and moved to the
-//! front. A terminal in one of a group's tabs, its home included, also
-//! gets that group's memories, as one tile with a count. Tiles that do not
-//! fit the row go behind a ⋯ tile.
+//! written by agents through the `saveNote` tool. A group also has notes of
+//! its own, in its folder beside its memories, which only the terminals in
+//! its tabs show; a note moves between the two from its menu. Under an
+//! agent's terminal a strip shows one tile per note, newest edit first, a
+//! group's in the info color; a note that @mentions this terminal or its
+//! workspace is outlined and moved to the front. A terminal in one of a
+//! group's tabs, its home included, also gets that group's memories, as one
+//! tile with a count. Tiles that do not fit the row go behind a ⋯ tile.
 
 use std::{
     collections::HashMap,
@@ -39,6 +41,8 @@ pub struct Note {
     pub mentions: Vec<String>,
     /// The signature's `@handle · repo (branch)`: who wrote it.
     pub from: Option<String>,
+    /// The group whose folder holds it; None for a note every terminal shows.
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +57,8 @@ pub struct Notes {
     pub notes: Signal<Vec<Note>>,
     /// Each group's memories, by the group's name.
     pub memories: Signal<HashMap<String, Vec<Memory>>>,
+    /// Each group's own notes, by the group's name.
+    pub group_notes: Signal<HashMap<String, Vec<Note>>>,
     /// Terminals running an agent: the only ones that show the strip.
     pub agents: Signal<Vec<u64>>,
     /// Bumped to re-read the folders now rather than at the next 3s poll
@@ -84,12 +90,29 @@ pub fn memories_dir(s: &Settings, group: &str) -> Option<PathBuf> {
     Some(id_dir(&sessions_root(), s.group_ids.get(group)?))
 }
 
+/// A group's notes folder: `group-sessions/group-<id>/notes`, beside its
+/// memories and keyed the same way.
+pub fn group_notes_dir(s: &Settings, group: &str) -> Option<PathBuf> {
+    Some(group_root(&sessions_root(), s.group_ids.get(group)?).join("notes"))
+}
+
+/// The group of the deepest tab holding `cwd`, so a home nested under a
+/// member still wins.
+pub fn group_at(s: &Settings, cwd: &str) -> Option<String> {
+    let owner = s.tabs.iter().filter(|t| cwd == t.path || cwd.starts_with(&format!("{}/", t.path))).max_by_key(|t| t.path.len())?;
+    group_key(owner, &s.groups).map(str::to_owned)
+}
+
 fn sessions_root() -> PathBuf {
     settings::bolt_data_dir().join("group-sessions")
 }
 
+fn group_root(root: &Path, id: &str) -> PathBuf {
+    root.join(format!("group-{id}"))
+}
+
 fn id_dir(root: &Path, id: &str) -> PathBuf {
-    root.join(format!("group-{id}")).join("memories")
+    group_root(root, id).join("memories")
 }
 
 /// Moves the memories of each group with a home out of Bolt's folder for
@@ -199,29 +222,31 @@ pub fn md_files(dir: &std::path::Path) -> Vec<(String, PathBuf, f64)> {
     out
 }
 
-/// The notes, newest edit first; a file's text is read again only when its
-/// mtime changed (`refreshNotesAtom`).
-fn read_notes(prev: Vec<Note>) -> Vec<Note> {
-    md_files(&notes_dir())
+/// The notes in `dir`, newest edit first; a file's text is read again only
+/// when its mtime changed (`refreshNotesAtom`).
+fn read_notes(dir: &Path, group: Option<&str>, prev: &[Note]) -> Vec<Note> {
+    let group = group.map(str::to_owned);
+    md_files(dir)
         .into_iter()
         .map(|(name, path, m)| {
             let path = path.to_string_lossy().into_owned();
             if let Some(hit) = prev.iter().find(|n| n.path == path && n.mtime == m) {
-                return hit.clone();
+                // A renamed group keeps its folder, so only the name can be stale.
+                return Note { group: group.clone(), ..hit.clone() };
             }
             let text = std::fs::read_to_string(&path).unwrap_or_default();
             let (body, from) = split_signature(&text);
-            Note { name, mentions: mentions(body), path, mtime: m, from }
+            Note { name, mentions: mentions(body), path, mtime: m, from, group: group.clone() }
         })
         .collect()
 }
 
 /// Makes the notes state and keeps it current: terminal agents every 1.5s
-/// (Bolt's status poll), the notes and memories every 3s while an agent runs
-/// (`useNotesPoll`).
+/// (Bolt's status poll), the notes, group notes and memories every 3s while
+/// an agent runs (`useNotesPoll`).
 pub fn provide(shell: Shell) -> Notes {
     let tick = signal(0_u32);
-    let notes = Notes { notes: signal(Vec::new()), memories: signal(HashMap::new()), agents: signal(Vec::new()), tick };
+    let notes = Notes { notes: signal(Vec::new()), memories: signal(HashMap::new()), group_notes: signal(HashMap::new()), agents: signal(Vec::new()), tick };
     provide_context(notes);
     PROVIDED.with(|p| p.set(Some(notes)));
     set_interval(Duration::from_millis(1500), move || {
@@ -236,24 +261,27 @@ pub fn provide(shell: Shell) -> Notes {
             return;
         }
         let prev = notes.notes.get_untracked();
-        let dirs: Vec<(String, PathBuf)> = shell.settings.with_untracked(|s| s.groups.iter().filter_map(|g| Some((g.clone(), memories_dir(s, g)?))).collect());
+        let prev_group: Vec<Note> = notes.group_notes.with_untracked(|m| m.values().flatten().cloned().collect());
+        let dirs: Vec<(String, PathBuf, PathBuf)> =
+            shell.settings.with_untracked(|s| s.groups.iter().filter_map(|g| Some((g.clone(), memories_dir(s, g)?, group_notes_dir(s, g)?))).collect());
         spawn(async move {
-            let (next, memories) = git::off_thread(move || {
-                let memories: HashMap<String, Vec<Memory>> = dirs
-                    .into_iter()
-                    .map(|(group, dir)| {
-                        let list = md_files(&dir)
-                            .into_iter()
-                            .map(|(name, path, m)| Memory { name, path: path.to_string_lossy().into_owned(), mtime: m })
-                            .collect();
-                        (group, list)
-                    })
-                    .collect();
-                (read_notes(prev), memories)
+            let (next, memories, group_notes) = git::off_thread(move || {
+                let mut memories: HashMap<String, Vec<Memory>> = HashMap::new();
+                let mut group_notes: HashMap<String, Vec<Note>> = HashMap::new();
+                for (group, mem_dir, note_dir) in dirs {
+                    let list = md_files(&mem_dir)
+                        .into_iter()
+                        .map(|(name, path, m)| Memory { name, path: path.to_string_lossy().into_owned(), mtime: m })
+                        .collect();
+                    group_notes.insert(group.clone(), read_notes(&note_dir, Some(&group), &prev_group));
+                    memories.insert(group, list);
+                }
+                (read_notes(&notes_dir(), None, &prev), memories, group_notes)
             })
             .await;
             notes.notes.set(next);
             notes.memories.set(memories);
+            notes.group_notes.set(group_notes);
         });
     });
     notes
@@ -284,26 +312,16 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
     let state = notes();
     let width = signal(0.0_f32);
     let is_agent = move || state.agents.with(|o| o.contains(&id));
-    // The deepest tab holding this cwd decides the group, so a home nested
-    // under a member still wins.
-    let group_memories = {
+    let group = {
         let cwd = cwd.clone();
-        move || -> (Option<String>, Vec<Memory>) {
-            let s = shell.settings.get();
-            let owner = s
-                .tabs
-                .iter()
-                .filter(|t| cwd == t.path || cwd.starts_with(&format!("{}/", t.path)))
-                .max_by_key(|t| t.path.len());
-            let Some(group) = owner.and_then(|t| group_key(t, &s.groups)).map(str::to_owned) else {
-                return (None, Vec::new());
-            };
-            let memories = state.memories.with(|m| m.get(&group).cloned()).unwrap_or_default();
-            (Some(group), memories)
-        }
+        move || shell.settings.with(|s| group_at(s, &cwd))
+    };
+    let group_memories = {
+        let group = group.clone();
+        move || -> Vec<Memory> { group().and_then(|g| state.memories.with(|m| m.get(&g).cloned())).unwrap_or_default() }
     };
     let items = {
-        let group_memories = group_memories.clone();
+        let (group, group_memories) = (group.clone(), group_memories.clone());
         move || -> Vec<Item> {
             let handle = hub::targets(shell)
                 .into_iter()
@@ -312,10 +330,14 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
             let mine = |m: &[String]| {
                 handle.as_ref().is_some_and(|h| m.contains(h) || m.iter().any(|x| Some(x.as_str()) == h.split('/').next()))
             };
-            let all = state.notes.get();
+            let mut all = state.notes.get();
+            if let Some(g) = group() {
+                all.extend(state.group_notes.with(|m| m.get(&g).cloned()).unwrap_or_default());
+                all.sort_by(|a, b| b.mtime.total_cmp(&a.mtime));
+            }
             let (hits, rest): (Vec<Note>, Vec<Note>) = all.into_iter().partition(|n| mine(&n.mentions));
             let mut out: Vec<Item> = hits.into_iter().map(|n| Item::Note(n, true)).collect();
-            if !group_memories().1.is_empty() {
+            if !group_memories().is_empty() {
                 out.push(Item::Memories);
             }
             out.extend(rest.into_iter().map(|n| Item::Note(n, false)));
@@ -368,13 +390,14 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
             let n = shown();
             let cwd = cwd.clone();
             let gm = group_memories.clone();
+            let here = group();
             let mut tiles: Vec<AnyElement> = all
                 .iter()
                 .take(n)
                 .map(|it| match it {
                     Item::Note(note, hit) => {
-                        let (path, hit) = (note.path.clone(), *hit);
-                        let cwd = cwd.clone();
+                        let (picked, hit) = (note.clone(), *hit);
+                        let (cwd, here) = (cwd.clone(), here.clone());
                         text(note.name.clone())
                             .h(px(24.0))
                             .px_2()
@@ -384,15 +407,15 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
                             .text_size(px(11.0))
                             .line_height(px(24.0))
                             .bg(color(tile_bg(hit)))
-                            .text_color(color(fg))
+                            .text_color(color(if note.group.is_some() { info } else { fg }))
                             .when(hit, |t| t.border_1().border_color(color(accent)))
                             .hover(move |s| s.bg(color(tile_bg(true))))
-                            .on_press(move || note_menu(shell, id, &cwd, &path))
+                            .on_press(move || note_menu(shell, id, &cwd, &picked, here.as_deref()))
                             .into_element()
                     }
                     Item::Memories => {
                         let gm = gm.clone();
-                        let count = gm().1.len();
+                        let count = gm().len();
                         view()
                             .w(px(24.0))
                             .h(px(24.0))
@@ -401,7 +424,7 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
                             .justify_center()
                             .bg(color(surface))
                             .hover(move |s| s.bg(color(tile_bg(true))))
-                            .on_press(move || memories_menu(gm().1))
+                            .on_press(move || memories_menu(gm()))
                             .child(text("◈").text_size(px(13.0)).text_color(color(info)))
                             .child(
                                 text(count.to_string())
@@ -423,6 +446,7 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
                 let hidden: Vec<Item> = all[n..].to_vec();
                 let cwd = cwd.clone();
                 let gm = gm.clone();
+                let here = here.clone();
                 tiles.push(
                     text("⋯")
                         .w(px(MORE_WIDTH))
@@ -433,7 +457,7 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
                         .bg(color(surface))
                         .text_color(color(fg))
                         .hover(move |s| s.bg(color(tile_bg(true))))
-                        .on_press(move || more_menu(shell, id, &cwd, &hidden, gm().1))
+                        .on_press(move || more_menu(shell, id, &cwd, &hidden, gm(), here.as_deref()))
                         .into_element(),
                 );
             }
@@ -442,11 +466,13 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
 }
 
 /// A note's actions (the bubble's): inject and remove, inject, inject into
-/// a new agent, open, remove.
-fn note_actions(shell: Shell, id: u64, cwd: &str, path: &str) -> Vec<MenuItem> {
-    let (p1, p2, p3, p4, p5) = (path.to_owned(), path.to_owned(), path.to_owned(), path.to_owned(), path.to_owned());
+/// a new agent, open, move it between global and the group of terminal
+/// `id`'s tab (`group`), remove.
+fn note_actions(shell: Shell, id: u64, cwd: &str, note: &Note, group: Option<&str>) -> Vec<MenuItem> {
+    let path = note.path.as_str();
+    let (p1, p2, p3, p4, p5, p6) = (path.to_owned(), path.to_owned(), path.to_owned(), path.to_owned(), path.to_owned(), path.to_owned());
     let cwd = cwd.to_owned();
-    vec![
+    let mut items = vec![
         MenuItem::new("Inject and remove").on_select(move || {
             if inject(id, &p1) {
                 remove(&p1);
@@ -459,12 +485,21 @@ fn note_actions(shell: Shell, id: u64, cwd: &str, path: &str) -> Vec<MenuItem> {
         MenuItem::new("Open").on_select(move || {
             let _ = open_path(p4.clone());
         }),
-        MenuItem::new("Remove").destructive(true).on_select(move || remove(&p5)),
-    ]
+    ];
+    let target = match (&note.group, group) {
+        (Some(_), _) => Some(("Move to global".to_owned(), notes_dir())),
+        (None, Some(g)) => shell.settings.with_untracked(|s| group_notes_dir(s, g)).map(|dir| (format!("Move to group {g}"), dir)),
+        (None, None) => None,
+    };
+    if let Some((label, dir)) = target {
+        items.push(MenuItem::new(label).on_select(move || move_note(&p6, &dir)));
+    }
+    items.push(MenuItem::new("Remove").destructive(true).on_select(move || remove(&p5)));
+    items
 }
 
-fn note_menu(shell: Shell, id: u64, cwd: &str, path: &str) {
-    let _ = popup_menu(note_actions(shell, id, cwd, path));
+fn note_menu(shell: Shell, id: u64, cwd: &str, note: &Note, group: Option<&str>) {
+    let _ = popup_menu(note_actions(shell, id, cwd, note, group));
 }
 
 fn memories_menu(memories: Vec<Memory>) {
@@ -485,11 +520,11 @@ fn memory_items(memories: Vec<Memory>) -> Vec<MenuItem> {
 
 /// The ⋯ tile's list: a hidden note opens its actions, the memories their
 /// files.
-fn more_menu(shell: Shell, id: u64, cwd: &str, hidden: &[Item], memories: Vec<Memory>) {
+fn more_menu(shell: Shell, id: u64, cwd: &str, hidden: &[Item], memories: Vec<Memory>, group: Option<&str>) {
     let mut items = Vec::new();
     for it in hidden {
         match it {
-            Item::Note(n, _) => items.push(MenuItem::submenu(n.name.clone(), note_actions(shell, id, cwd, &n.path))),
+            Item::Note(n, _) => items.push(MenuItem::submenu(n.name.clone(), note_actions(shell, id, cwd, n, group))),
             Item::Memories => items.extend(memory_items(memories.clone())),
         }
     }
@@ -502,6 +537,23 @@ fn inject(id: u64, path: &str) -> bool {
     state::paste(id, text.trim_end());
     state::focus_terminal(id);
     true
+}
+
+/// Moves a note into `dir`, the global folder or a group's, never over a
+/// note by that name there.
+fn move_note(path: &str, dir: &Path) {
+    let from = Path::new(path);
+    let Some(name) = from.file_name() else { return };
+    let to = dir.join(name);
+    if to.exists() {
+        eprintln!("rivet: note {path} not moved: {} has a note by that name", dir.display());
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(dir).and_then(|()| std::fs::rename(from, &to)) {
+        eprintln!("rivet: note {path} not moved to {}: {e}", dir.display());
+        return;
+    }
+    refresh();
 }
 
 fn remove(path: &str) {
