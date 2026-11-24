@@ -701,31 +701,29 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                 ),
         )
         .child(
-            // `var(--theme-bg)`: the editor background, as Bolt's log has it.
-            view().flex_1().min_h(px(0.0)).rounded(px(RADIUS)).overflow_hidden().bg(rgb(crate::theme::BOLT_THEME.vars.bg)).child(
-                scroll()
-                    .element_ref(&log_ref)
-                    .flex_1()
-                    .opacity(move || if placed.get() { 1.0_f32 } else { 0.0 })
-                    .on_layout(move |b: &Bounds<Points>| viewport.set(b.size.height.0))
-                    .child(
-                        view()
-                            .w_full()
-                            .max_w(px(720.0))
-                            .self_center()
-                            .px_4()
-                            .pt_4()
-                            .pb(move || px(viewport.get()))
-                            .gap_3()
-                            .child(when(empty, || {
-                                text("/ runs a command or a Bolt command, @handle posts to a terminal, # runs a script, : types into a terminal.")
-                                    .text_size(px(12.0))
-                                    .line_height(px(20.0))
-                                    .text_color(rgba(0xffffffb3))
-                            }))
-                            .child(rows),
-                    ),
-            ),
+            scroll()
+                .element_ref(&log_ref)
+                .flex_1()
+                .min_h(px(0.0))
+                .opacity(move || if placed.get() { 1.0_f32 } else { 0.0 })
+                .on_layout(move |b: &Bounds<Points>| viewport.set(b.size.height.0))
+                .child(
+                    view()
+                        .w_full()
+                        .max_w(px(720.0))
+                        .self_center()
+                        .px_4()
+                        .pt_4()
+                        .pb(move || px(viewport.get()))
+                        .gap_3()
+                        .child(when(empty, || {
+                            text("/ runs a command or a Bolt command, @handle posts to a terminal, # runs a script, : types into a terminal.")
+                                .text_size(px(12.0))
+                                .line_height(px(20.0))
+                                .text_color(rgba(0xffffffb3))
+                        }))
+                        .child(rows),
+                ),
         )
         .child(
             view()
