@@ -341,8 +341,8 @@ pub fn ChangesView(props: ChangesViewProps) -> impl IntoElement {
                     .new_value(after)
                     .language(name)
                     .font_family(crate::terminals::font_family())
-                    .font_size(Points(12.0))
-                    .line_height(Points(18.0))
+                    .font_size(move || Points(shell.font_size_tracked()))
+                    .line_height(move || Points((shell.font_size_tracked() * crate::terminals::CODE_LINE).round()))
                     .flex_1()
                     .into_element(),
                 (None, Some(Ok(l))) if l.files.is_empty() => empty("No changes"),

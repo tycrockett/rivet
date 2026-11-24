@@ -55,6 +55,12 @@ pub fn defaults() -> Vec<KeyBinding> {
         out.extend([kb(&format!("cmd+{k}"), c), kb(&format!("ctrl+{k}"), c)]);
     }
     out.push(kb("escape", "input.clear"));
+    // ⌘ only: Control+- and Control+= belong to the programs in the terminals.
+    out.extend([
+        kb("cmd+plus", "view.zoomIn"),
+        kb("cmd+shift+plus", "view.zoomIn"),
+        kb("cmd+minus", "view.zoomOut"),
+    ]);
     for i in 0..9 {
         for m in ["cmd", "ctrl"] {
             out.push(KeyBinding { args: Some(serde_json::json!({ "index": i })), ..kb(&format!("{m}+{}", i + 1), "workspace.switchTab") });
@@ -133,5 +139,12 @@ mod tests {
     fn bolt_keys_become_nsh_chords() {
         assert_eq!(chord("cmd+shift+["), "mod+shift+[");
         assert_eq!(chord("Ctrl+Backquote"), "ctrl+`");
+    }
+
+    #[test]
+    fn every_default_is_a_chord_nsh_reads() {
+        for k in defaults() {
+            assert!(nsh_core::keymap::Keystroke::parse_with(&chord(&k.key), true).is_ok(), "{}", k.key);
+        }
     }
 }

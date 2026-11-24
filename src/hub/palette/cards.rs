@@ -969,9 +969,19 @@ pub fn finder_card(shell: Shell) -> AnyElement {
 }
 
 /// The open finder, joined to the top of the input: the folders of the
-/// current directory, filtered by what the input says, and the bookmarks;
-/// a click goes there. Made again for each `n`, so a bump re-reads them.
-pub fn finder_panel(shell: Shell, hub: Hub, folders: Signal<Vec<String>>, go: Rc<dyn Fn(Vec<String>)>) -> AnyElement {
+/// current directory, filtered by `query` (what the input says), and the
+/// bookmarks; a click goes there. Made again for each `n`, so a bump
+/// re-reads them. `show_dir` puts the directory beside its chip, for a
+/// finder with no other place showing it. `fill` grows the folders into
+/// the panel's holder in place of capping them.
+pub fn finder_panel(
+    shell: Shell,
+    query: Memo<String>,
+    folders: Signal<Vec<String>>,
+    go: Rc<dyn Fn(Vec<String>)>,
+    show_dir: bool,
+    fill: bool,
+) -> AnyElement {
     let dir_of = move || shell.settings.with(|s| s.directory.clone());
     effect(move || {
         let dir = dir_of();
@@ -979,7 +989,6 @@ pub fn finder_panel(shell: Shell, hub: Hub, folders: Signal<Vec<String>>, go: Rc
             folders.set(read_folders(&dir));
         }
     });
-    let query = hub.finder_query;
     let row = {
         let go = go.clone();
         move |label: String, cd: String, hint: Option<String>, icon: &'static str| {
@@ -1021,6 +1030,7 @@ pub fn finder_panel(shell: Shell, hub: Hub, folders: Signal<Vec<String>>, go: Rc
     let marks: Vec<(String, String)> = shell.settings.with_untracked(|s| s.bookmarks.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
     let shown = move || finder_matches(&folders.get(), &query.get());
     let mut c = view()
+        .when(fill, |v| v.flex_1().min_h(px(0.0)))
         .border_b_1()
         .border_color(rgb(FINDER_TONE).opacity(0.35))
         .pb_1()
@@ -1032,10 +1042,10 @@ pub fn finder_panel(shell: Shell, hub: Hub, folders: Signal<Vec<String>>, go: Rc
                 .px_2()
                 .pb(px(6.0))
                 .child(chip("▸", "finder", rgb(FINDER_TONE)).flex_shrink(0.0))
-                .child(text(move || tilde(&dir_of())).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted())),
+                .when(show_dir, |v| v.child(text(move || tilde(&dir_of())).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted()))),
         )
         .child(
-            scroll().max_h(px(200.0)).child(
+            scroll().when(fill, |v| v.flex_1().min_h(px(0.0))).when(!fill, |v| v.max_h(px(200.0))).child(
                 view()
                     .child(when(move || shown().is_empty(), move || {
                         view().px_2().py(px(6.0)).child(

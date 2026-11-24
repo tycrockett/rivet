@@ -168,8 +168,8 @@ pub fn DocView(props: DocViewProps) -> impl IntoElement {
                     .language(language)
                     .layout(if unified { DiffLayout::Unified } else { DiffLayout::Split })
                     .font_family(crate::terminals::font_family())
-                    .font_size(Points(12.0))
-                    .line_height(Points(18.0))
+                    .font_size(move || Points(shell.font_size_tracked()))
+                    .line_height(move || Points((shell.font_size_tracked() * crate::terminals::CODE_LINE).round()))
                     .flex_1()
                     .into_element(),
                 _ => {
@@ -180,8 +180,8 @@ pub fn DocView(props: DocViewProps) -> impl IntoElement {
                         .component_ref(&eref)
                         .language(language)
                         .font_family(crate::terminals::font_family())
-                        .font_size(Points(12.0))
-                        .line_height(Points(18.0))
+                        .font_size(move || Points(shell.font_size_tracked()))
+                        .line_height(move || Points((shell.font_size_tracked() * crate::terminals::CODE_LINE).round()))
                         .default_value(text.clone())
                         .on_change(move |t: &SharedString| save(t.to_string()))
                         .flex_1()
@@ -227,8 +227,8 @@ fn proposal_view(shell: Shell, id: u64, doc: Memo<Option<Doc>>, rel: String, lan
             .language(language.clone())
             .layout(layout)
             .font_family(crate::terminals::font_family())
-            .font_size(Points(12.0))
-            .line_height(Points(18.0))
+            .font_size(move || Points(shell.font_size_tracked()))
+            .line_height(move || Points((shell.font_size_tracked() * crate::terminals::CODE_LINE).round()))
             .flex_1()
             .into_element()
     });

@@ -167,21 +167,39 @@ pub fn terminals() -> impl IntoElement {
         .child(panes_overlay(shell))
 }
 
-/// A workspace with no tabs: its directory, large, in the top left. The
-/// tab rows that move the window are gone with the columns, so it does.
+/// A workspace with no tabs: a card with its directory, large, over the
+/// finder, to go somewhere and add a tab. It fills the space a column's
+/// terminal box would, under a strip as tall as the tab row; that strip
+/// and the margins move the window, as the tab rows they stand in for do.
 fn empty(shell: Shell) -> impl IntoElement {
     view()
         .absolute()
         .inset_0()
-        .pt(px(96.0))
-        .pl(px(96.0))
-        .pr(px(48.0))
+        .pt(px(36.0))
+        .px_3()
+        .pb_3()
         .window_drag(true)
         .child(
-            text(move || crate::paths::tilde(&shell.directory()))
-                .text_size(px(32.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(color(BOLT_THEME.vars.fg)),
+            view()
+                .flex_1()
+                .min_h(px(0.0))
+                .window_drag(false)
+                .gap_4()
+                .p_6()
+                .rounded(px(12.0))
+                .overflow_hidden()
+                .bg(color(BOLT_THEME.xterm.background))
+                // The terminal box's frame.
+                .border_1()
+                .border_color(color(BOLT_THEME.vars.fg).opacity(0.09))
+                .child(
+                    text(move || crate::paths::tilde(&shell.directory()))
+                        .number_of_lines(1)
+                        .text_size(px(32.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(color(BOLT_THEME.vars.fg)),
+                )
+                .child(hub::palette::finder(shell)),
         )
 }
 
@@ -430,6 +448,11 @@ fn panes_overlay(shell: Shell) -> impl IntoElement {
     })
 }
 
+/// Line height over font size: xterm's 14 over 12, Monaco's 18 over 12;
+/// both keep their ratio as ⌘+ / ⌘- change the size.
+const TERMINAL_LINE: f32 = 14.0 / 12.0;
+pub(crate) const CODE_LINE: f32 = 18.0 / 12.0;
+
 /// xterm's font: JetBrains Mono when installed, else what Chromium's
 /// `monospace` falls back to on macOS, Menlo.
 pub(crate) fn font_family() -> &'static str {
@@ -601,8 +624,8 @@ pub fn TermView(props: TermViewProps) -> impl IntoElement {
         .component_ref(&tref)
         .accessibility_label("Shell")
         .font_family(font_family())
-        .font_size(Points(12.0))
-        .line_height(Points(14.0))
+        .font_size(move || Points(shell.font_size_tracked()))
+        .line_height(move || Points((shell.font_size_tracked() * TERMINAL_LINE).round()))
         .cursor_style(|s| s.bg(color(BOLT_THEME.xterm.cursor)))
         .scrollback(state::SCROLLBACK as u32)
         .on_data(move |data: &SharedString| state::pty_write(id, data))

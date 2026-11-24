@@ -157,6 +157,9 @@ fn keys(shell: Shell, hub: hub::Hub, hints: hints::Hints, pr: pr_bar::PrBar) {
             "panes.activate" => on_key(&chord, move |_| shell.panes_overlay.update(|o| *o = !*o)),
             // `request_close_tab` ignores a directory with no tab.
             "workspace.closeTab" => on_key_with(&chord, always(), move |_| sidebar::request_close_tab(hub, shell.directory())),
+            // The code text of terminals, files and diffs, wherever the focus is.
+            "view.zoomIn" => on_key_with(&chord, always(), move |_| shell.zoom_text(1.0)),
+            "view.zoomOut" => on_key_with(&chord, always(), move |_| shell.zoom_text(-1.0)),
             // ⌘2–⌘9 number the rows on screen; index 0 (⌘1) is Bolt's
             // fleet view, not here.
             "workspace.switchTab" => {

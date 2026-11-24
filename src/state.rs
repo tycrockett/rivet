@@ -175,6 +175,16 @@ struct Live {
 /// Lines a terminal keeps above its screen.
 pub const SCROLLBACK: usize = 5000;
 
+/// The `settings.extra` key of the code text size, its default (Bolt's
+/// xterm and Monaco size) and the sizes ⌘+ / ⌘- step within.
+const FONT_SIZE_KEY: &str = "fontSize";
+pub const DEFAULT_FONT_SIZE: f32 = 12.0;
+const FONT_SIZES: std::ops::RangeInclusive<f32> = 8.0..=32.0;
+
+fn font_size_of(s: &Settings) -> f32 {
+    s.extra.get(FONT_SIZE_KEY).and_then(|v| v.as_f64()).map_or(DEFAULT_FONT_SIZE, |v| (v as f32).clamp(*FONT_SIZES.start(), *FONT_SIZES.end()))
+}
+
 thread_local! {
     static PTYS: RefCell<HashMap<u64, Live>> = RefCell::new(HashMap::new());
     /// Tab ids, terminals' and files' alike: a column holds both.
@@ -629,6 +639,28 @@ impl Shell {
     /// [`Self::opens_new_column`], for a view that follows it.
     pub fn opens_new_column_tracked(&self) -> bool {
         self.settings.with(|s| s.extra.get("openInNewColumn").and_then(|v| v.as_bool()) == Some(true))
+    }
+
+    /// `fontSize` (⌘+ / ⌘-): the code text size of terminals, files and
+    /// diffs, [`DEFAULT_FONT_SIZE`] while unset; for a view that follows it.
+    pub fn font_size_tracked(&self) -> f32 {
+        self.settings.with(font_size_of)
+    }
+
+    /// Steps the code text size by `by` points, within [`FONT_SIZES`]; back
+    /// at the default, the setting is removed.
+    pub fn zoom_text(&self, by: f32) {
+        let size = (self.settings.with_untracked(font_size_of) + by).clamp(*FONT_SIZES.start(), *FONT_SIZES.end());
+        if size == self.settings.with_untracked(font_size_of) {
+            return;
+        }
+        self.update_settings(|s| {
+            if size == DEFAULT_FONT_SIZE {
+                s.extra.remove(FONT_SIZE_KEY);
+            } else {
+                s.extra.insert(FONT_SIZE_KEY.into(), size.into());
+            }
+        });
     }
 
     /// Shows the Settings tab (`openSettingsAtom`): the one open, else a new

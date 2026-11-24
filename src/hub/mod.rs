@@ -269,8 +269,6 @@ pub struct Hub {
     pub shell: Shell,
     pub thread: Signal<Vec<HubEntry>>,
     pub palette: Signal<Option<PaletteOpen>>,
-    /// The open finder's filter (`finderQueryAtom`).
-    pub finder_query: Signal<String>,
     pub commands: Signal<Vec<BoltCommand>>,
     /// While true a directory change keeps the palette open
     /// (`navigateInPalette`).
@@ -333,7 +331,6 @@ pub fn provide(shell: Shell) -> Hub {
         shell,
         thread: signal(load_thread()),
         palette: signal(None),
-        finder_query: signal(String::new()),
         commands: signal(engine::load_commands()),
         navigating: signal(false),
     };

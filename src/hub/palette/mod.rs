@@ -4,7 +4,10 @@
 
 mod cards;
 mod editor;
+mod finder;
 mod help;
+
+pub use finder::finder;
 
 use std::{cell::RefCell, collections::HashMap, future::Future, rc::Rc};
 
@@ -29,8 +32,6 @@ const SHOWN: usize = 60;
 
 /// The palette's corners, its panels' and its cards': the terminal box's.
 pub(super) const RADIUS: f32 = 12.0;
-
-const FINDER_HELP: &str = "finder · folder name or cd <path> · .. · ~ · mkdir <name> · tab [<folder>] · bm <name> · bm add|rm <name> · exit";
 
 /// Runs `f` under no owner, so closing the palette does not end it.
 fn spawn_detached(f: impl Future<Output = ()> + 'static) {
@@ -111,28 +112,12 @@ impl Env {
         })
     }
 
-    /// What the finder filters its folders by: the last word of the line,
-    /// unless it is a command or a path (`finderQuery`).
+    /// What the open finder filters its folders by (`finderQuery`).
     fn finder_query(&self, text: &str) -> String {
         if self.open_finder().is_none() || starts_prefixed(text) {
             return String::new();
         }
-        let head = text.trim_start();
-        let first = head.split_whitespace().next().unwrap_or("");
-        if matches!(first, "mkdir" | "bm") && (head.len() == first.len() || head[first.len()..].starts_with(char::is_whitespace)) {
-            return String::new();
-        }
-        if head.contains(['/', '~']) {
-            return String::new();
-        }
-        for verb in ["cd", "tab"] {
-            if let Some(rest) = head.strip_prefix(verb) {
-                if rest.starts_with(char::is_whitespace) {
-                    return rest.trim_start().to_owned();
-                }
-            }
-        }
-        head.to_owned()
+        finder::query(text)
     }
 
     /// Tab in the finder completes the folder being typed (`completeFolder`).
@@ -140,39 +125,9 @@ impl Env {
         if self.open_finder().is_none() {
             return false;
         }
-        let text = self.text.get_untracked();
-        let query = self.finder_query(&text);
-        if query.is_empty() {
-            return true;
+        if !starts_prefixed(&self.text.get_untracked()) {
+            finder::complete(self.text, &self.folders.get_untracked());
         }
-        let folders = self.folders.get_untracked();
-        let q = query.to_lowercase();
-        let starts: Vec<&String> = folders.iter().filter(|f| f.to_lowercase().starts_with(&q)).collect();
-        let pool: Vec<String> = if starts.is_empty() {
-            finder_matches(&folders, &query)
-        } else {
-            starts.iter().map(|s| (*s).clone()).collect()
-        };
-        if pool.is_empty() {
-            return true;
-        }
-        let mut done = pool[0].clone();
-        if pool.len() > 1 {
-            if starts.is_empty() {
-                return true;
-            }
-            let first: Vec<char> = done.chars().collect();
-            let mut n = 0;
-            while n < first.len() && pool.iter().all(|f| f.chars().nth(n).is_some_and(|c| c.to_lowercase().eq(first[n].to_lowercase()))) {
-                n += 1;
-            }
-            done = first[..n].iter().collect();
-        }
-        if done == query || done.chars().count() < query.chars().count() {
-            return true;
-        }
-        let keep = text.len() - query.len();
-        self.text.set(format!("{}{}", &text[..keep], done));
         true
     }
 
@@ -224,71 +179,19 @@ impl Env {
 
     /// The finder's lines (`plan`'s finder branch).
     fn finder_plan(self: &Rc<Self>, t: &str, id: &str) -> Plan {
-        let env = self.clone();
-        let bump = Env::bump_finder(self.hub, id.to_owned());
-        let nav = {
-            let env = env.clone();
-            move |cmds: Vec<String>| {
-                let (env, bump) = (env.clone(), bump.clone());
-                move || env.navigate(cmds.clone(), Some(bump.clone()))
-            }
-        };
-        let home = self.shell.settings.with_untracked(|s| s.home.clone());
         if t.is_empty() {
-            return Plan::says(FINDER_HELP);
+            return Plan::says(format!("finder · {} · exit", finder::HELP));
         }
         if t == "exit" || t == "q" {
             let hub = self.hub;
             return Plan::sends("closes the finder", move || hub.close_finders());
         }
-        if t == ".." {
-            return Plan::sends("goes up a folder", nav(vec!["..".into()]));
-        }
-        if t == "~" {
-            return Plan::sends("goes home", nav(vec!["cd".into()]));
-        }
-        if let Some(name) = t.strip_prefix("mkdir").filter(|r| r.starts_with(char::is_whitespace)).map(str::trim_start).filter(|n| !n.is_empty()) {
-            return Plan::sends(format!("makes {name}"), nav(vec![format!("mkdir {}", json(name))]));
-        }
-        if let Some(rest) = t.strip_prefix("tab").filter(|r| r.is_empty() || r.starts_with(char::is_whitespace)) {
-            let arg = rest.trim_start();
-            let reserved = arg.starts_with('-') || ["add", "rm", "group", "ungroup"].iter().any(|w| arg.strip_prefix(w).is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace)));
-            if !arg.is_empty() && !reserved {
-                return Plan::sends(format!("adds {arg} as a tab"), nav(vec![format!("cd {}", json(arg)), "tab".into()]));
-            }
-            return Plan::sends("adds this folder as a tab", nav(vec![t.to_owned()]));
-        }
-        if let Some(rest) = t.strip_prefix("bm").filter(|r| r.is_empty() || r.starts_with(char::is_whitespace)) {
-            let rest = rest.trim_start();
-            let (sub, name) = match rest.split_once(char::is_whitespace) {
-                Some((w, n)) if matches!(w, "add" | "rm" | "go") => (Some(w), n.trim_start()),
-                _ if matches!(rest, "add" | "rm" | "go") => (Some(rest), ""),
-                _ => (None, rest),
-            };
-            if name.is_empty() {
-                return Plan::says("bm <name> · bm add <name> · bm rm <name>");
-            }
-            if let Some(sub @ ("add" | "rm")) = sub {
-                let say = format!("{} {name}", if sub == "add" { "bookmarks this folder as" } else { "removes bookmark" });
-                return Plan::sends(say, nav(vec![format!("bm {sub} {}", json(name))]));
-            }
-            let path = self.shell.settings.with_untracked(|s| s.bookmarks.get(name).cloned());
-            let Some(path) = path else {
-                return Plan::says(format!("no bookmark {name}"));
-            };
-            return Plan::sends(format!("goes to {path}"), nav(vec![format!("cd {} --absolute", json(&path))]));
-        }
-        let to = t.strip_prefix("cd").filter(|r| r.starts_with(char::is_whitespace)).map_or(t, str::trim_start);
-        if to == "cd" {
-            return Plan::sends("goes home", nav(vec!["cd".into()]));
-        }
-        if let (Some(rest), false) = (to.strip_prefix("~/"), home.is_empty()) {
-            return Plan::sends(format!("goes to {to}"), nav(vec![format!("cd {} --absolute", json(&format!("{home}/{rest}")))]));
-        }
-        if to.starts_with('/') {
-            return Plan::sends(format!("goes to {to}"), nav(vec![format!("cd {} --absolute", json(to))]));
-        }
-        Plan::sends(format!("goes to {to}"), nav(vec![format!("cd {}", json(to))]))
+        let env = self.clone();
+        let bump = Env::bump_finder(self.hub, id.to_owned());
+        finder::plan(self.shell, t, move |cmds| {
+            let (env, bump) = (env.clone(), bump.clone());
+            Rc::new(move || env.navigate(cmds.clone(), Some(bump.clone())))
+        })
     }
 
     /// Reads the typed line (`plan`): what it says it does, and what
@@ -589,17 +492,11 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
         });
     });
 
-    // What the finder filters by follows the line; it is cleared on close.
+    // What the finder filters by follows the line.
     let query = computed({
         let env = env.clone();
-        move || {
-            let t = typed.get();
-            let q = env.finder_query(&t);
-            if q == ".." { String::new() } else { q }
-        }
+        move || env.finder_query(&typed.get())
     });
-    effect(move || hub.finder_query.set(query.get()));
-    cleanup(move || hub.finder_query.set(String::new()));
 
     // The plan, as the line says it: re-read on every keystroke and on
     // anything the thread opens or closes.
@@ -720,7 +617,6 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
     let color = frame_color(shell);
     let (from, to) = (mix(color, 0x000000, 0.45), mix(color, 0x000000, 0.80));
     let close = move || hub.palette.set(None);
-    let can_send = move || said.get().1;
     // While a finder is open the line goes to it: the finder sits on top of
     // the input, both framed in the finder's color. Made again for each
     // bump (`n`), which re-reads the folders.
@@ -742,13 +638,15 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                     return view().into_element();
                 }
                 let go: Rc<dyn Fn(Vec<String>)> = Rc::new(move |cmds| env.navigate(cmds, None));
-                cards::finder_panel(shell, hub, folders, go)
+                cards::finder_panel(shell, query, folders, go, true, false)
             })
         })
     };
 
-    let send_env = env.clone();
-    let enter_env = env.clone();
+    let send_env: Rc<dyn Fn()> = {
+        let env = env.clone();
+        Rc::new(move || env.send())
+    };
     let tab_env = env.clone();
     let header_tag = self_.as_ref().map(|s| format!("@{}", s.handle)).unwrap_or_else(|| "Bolt".to_owned());
     view()
@@ -846,48 +744,58 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                     scripts,
                     targets,
                     files,
-                    on_enter: Rc::new(move || enter_env.send()),
+                    on_enter: send_env.clone(),
                     on_tab: Rc::new(move || tab_env.complete_folder()),
                     close: Rc::new(close),
                     input_ref,
                     lead,
                     placeholder,
+                    keys: computed(|| true),
+                    auto_focus: true,
                 }))
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .px_2()
-                        .child(
-                            text(move || crate::paths::tilde(&said.get().0))
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .number_of_lines(1)
-                                .text_size(px(11.0))
-                                .text_color(move || {
-                                    if said.get().1 || typed.get().trim().is_empty() { rgba(0xffffffb3) } else { rgb(0xfecdd3) }
-                                }),
-                        )
-                        .child(
-                            view()
-                                .w(px(32.0))
-                                .h(px(32.0))
-                                .items_center()
-                                .justify_center()
-                                .rounded_full()
-                                .bg(rgb(FG))
-                                .opacity(move || if can_send() { 1.0_f32 } else { 0.4_f32 })
-                                .on_press(move || {
-                                    if can_send() {
-                                        send_env.send();
-                                    }
-                                })
-                                .child(text("↑").text_size(px(16.0)).font_weight(FontWeight::BOLD).text_color(rgb(color))),
-                        ),
-                ),
+                .child(send_row(move || said.get().0, move || said.get().1, typed, send_env, rgb(color))),
         )
         .into_element()
+}
+
+/// Under the input: what sending the line does, and the send button,
+/// faded while the line sends nothing.
+fn send_row(
+    say: impl Fn() -> String + 'static,
+    can_send: impl Fn() -> bool + Copy + 'static,
+    typed: Signal<String>,
+    send: Rc<dyn Fn()>,
+    arrow: Rgba,
+) -> impl IntoElement {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .px_2()
+        .child(
+            text(move || crate::paths::tilde(&say()))
+                .flex_1()
+                .min_w(px(0.0))
+                .number_of_lines(1)
+                .text_size(px(11.0))
+                .text_color(move || if can_send() || typed.get().trim().is_empty() { rgba(0xffffffb3) } else { rgb(0xfecdd3) }),
+        )
+        .child(
+            view()
+                .w(px(32.0))
+                .h(px(32.0))
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(rgb(FG))
+                .opacity(move || if can_send() { 1.0_f32 } else { 0.4_f32 })
+                .on_press(move || {
+                    if can_send() {
+                        send();
+                    }
+                })
+                .child(text("↑").text_size(px(16.0)).font_weight(FontWeight::BOLD).text_color(arrow)),
+        )
 }
 
 fn unix_now() -> f64 {
