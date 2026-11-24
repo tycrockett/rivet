@@ -664,7 +664,6 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
         .flex_col()
         .p_3()
         .rounded(px(RADIUS))
-        .shadow_2xl()
         .bg(rgb(BOLT_THEME.xterm.background))
         // The terminal box's frame: `var(--theme-fg)` at 9%.
         .border_1()
