@@ -269,6 +269,10 @@ pub struct Hub {
     pub shell: Shell,
     pub thread: Signal<Vec<HubEntry>>,
     pub palette: Signal<Option<PaletteOpen>>,
+    /// The open palette's input, whichever frame carries it.
+    pub palette_input: ElementRef,
+    /// Whether that input has the focus.
+    pub palette_focused: Signal<bool>,
     pub commands: Signal<Vec<BoltCommand>>,
     /// While true a directory change keeps the palette open
     /// (`navigateInPalette`).
@@ -331,6 +335,8 @@ pub fn provide(shell: Shell) -> Hub {
         shell,
         thread: signal(load_thread()),
         palette: signal(None),
+        palette_input: element_ref(),
+        palette_focused: signal(false),
         commands: signal(engine::load_commands()),
         navigating: signal(false),
     };
@@ -380,12 +386,16 @@ pub fn hub() -> Hub {
 }
 
 impl Hub {
-    /// Opens the palette as Bolt's `bolt.palette` does: speaking as the
-    /// current workspace, and as its shown terminal when it has one;
-    /// pressing it again closes it.
+    /// `bolt.palette` (⌘;): opens the palette as Bolt does, speaking as the
+    /// current workspace, and as its shown terminal when it has one; an
+    /// open palette without the focus takes it, and one with it closes.
     pub fn toggle_palette(&self) {
         if self.palette.with_untracked(Option::is_some) {
-            self.palette.set(None);
+            if self.palette_focused.get_untracked() {
+                self.palette.set(None);
+            } else {
+                self.palette_input.focus();
+            }
             return;
         }
         let dir = self.shell.directory();

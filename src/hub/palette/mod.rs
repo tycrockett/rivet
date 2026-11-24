@@ -428,7 +428,11 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
     let self_ = open.self_;
     let typed = signal(String::new());
     let folders = signal(Vec::<String>::new());
-    let input_ref = element_ref();
+    let input_ref = hub.palette_input;
+    // The frame going takes the focus with it, with no blur to say so.
+    cleanup(move || {
+        hub.palette_focused.try_set(false);
+    });
     let targets = computed(move || hub_targets(shell));
     let handles = computed(move || targets.with(|ts| ts.iter().map(|t| t.handle.clone()).collect::<Vec<_>>()));
     let handle_of = computed(move || {
@@ -755,6 +759,7 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                     close: Rc::new(close),
                     input_ref,
                     lead,
+                    focused: hub.palette_focused,
                     placeholder,
                 }))
                 .child(send_row(move || said.get().0, move || said.get().1, typed, send_env, rgb(color))),

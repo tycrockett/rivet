@@ -315,6 +315,8 @@ pub struct Editor {
     pub on_enter: Rc<dyn Fn()>,
     pub on_tab: Rc<dyn Fn() -> bool>,
     pub input_ref: ElementRef,
+    /// Whether the input has the focus, kept up to date here.
+    pub focused: Signal<bool>,
     /// The keyword the plan found, as bytes at the line's start.
     pub lead: Memo<usize>,
     pub close: Rc<dyn Fn()>,
@@ -323,12 +325,11 @@ pub struct Editor {
 }
 
 pub fn editor(e: Editor) -> impl IntoElement {
-    let Editor { value, commands, scripts, targets, files, on_enter, on_tab, input_ref, lead, close, placeholder } = e;
+    let Editor { value, commands, scripts, targets, files, on_enter, on_tab, input_ref, focused, lead, close, placeholder } = e;
     let commands = Rc::new(commands);
     let caret = signal(0_usize);
     let sel = signal(0_usize);
     let dismissed = signal(None::<usize>);
-    let focused = signal(false);
     let caret_x = signal(0.0_f32);
     let height = signal(44.0_f32);
     let force = signal_with((0_u32, 0_u32), SignalEquals::Never);

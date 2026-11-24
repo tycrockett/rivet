@@ -62,7 +62,7 @@ Bolt's defaults, rebindable in `keybindings.json` (`settings` → Keybindings; r
 
 | Key | Does |
 |---|---|
-| ⌘; | Bolt's palette: `/command`, `@handle message`, `#script`, `:keyword`, `@bolt …`, or a shell line for a new terminal |
+| ⌘; | Bolt's palette: `/command`, `@handle message`, `#script`, `:keyword`, `@bolt …`, or a shell line for a new terminal. Opens it; open without the focus, focuses its input; focused, closes it |
 | ⌘2–⌘9 | The Nth row on screen (⌘1 is Bolt's fleet view, not here) |
 | ⌥⌘↑ / ⌥⌘↓ | Previous / next workspace |
 | ⌘\` | New terminal here |
