@@ -270,9 +270,29 @@ fn card(running: bool) -> View {
         .rounded(px(RADIUS))
         .overflow_hidden()
         .bg(move || panel())
-        .when(running, |v| {
-            v.child(view().absolute().top_0().left_0().h(px(2.0)).w(relative(0.33)).bg(rgb(FG)))
-        })
+        .when(running, |v| v.child(loader()))
+}
+
+/// The loader's share of the card's width.
+const LOADER: f32 = 0.33;
+
+/// A running card's top line: a third of its width sweeping across it,
+/// every 1.2 s, until the card goes. Translation is in points, so the
+/// sweep scales a 0-to-1 run by the track's laid-out width.
+fn loader() -> View {
+    let width = animated_value(0.0);
+    let at = animated_value(-LOADER);
+    let sweep = Animation::timing(&at, 1.0, Timing::new(1200.0, Easing::EaseInOut)).looped(None);
+    let _ = sweep.start();
+    cleanup(move || sweep.stop());
+    view()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .h(px(2.0))
+        .on_layout(move |b: &Bounds<Points>| width.set(b.size.width.0))
+        .child(view().h_full().w(relative(LOADER)).bg(rgb(FG)).bind_translate_x(&at.mul(&width)))
 }
 
 fn job_kind(run: &Option<String>, to: &str) -> (&'static str, String) {
