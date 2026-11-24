@@ -81,12 +81,62 @@ pub struct Settings {
     pub pinned: Vec<Tab>,
     #[serde(default)]
     pub groups: Vec<String>,
+    /// Each group's id, by its name: what names the group's memory folder,
+    /// so a rename keeps it (`assign_group_ids`).
+    #[serde(default, rename = "groupIds", skip_serializing_if = "BTreeMap::is_empty")]
+    pub group_ids: BTreeMap<String, String>,
     #[serde(default)]
     pub bookmarks: BTreeMap<String, String>,
     #[serde(default)]
     pub commands: BTreeMap<String, String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+impl Settings {
+    /// Gives every group an id and drops the ids of groups that are gone,
+    /// returning whether any changed. Runs on load and on every settings
+    /// write, so a group made anywhere has one; a rename carries its id
+    /// over itself.
+    pub fn assign_group_ids(&mut self) -> bool {
+        let before = self.group_ids.len();
+        self.group_ids.retain(|name, _| self.groups.contains(name));
+        let mut changed = self.group_ids.len() != before;
+        for g in &self.groups {
+            if !self.group_ids.contains_key(g) {
+                self.group_ids.insert(g.clone(), new_group_id());
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// Renames group `old` to `new`, its tabs and its id with it, so its
+    /// memory folder stays its own.
+    pub fn rename_group(&mut self, old: &str, new: &str) {
+        for g in &mut self.groups {
+            if g == old {
+                new.clone_into(g);
+            }
+        }
+        for t in &mut self.tabs {
+            if t.group.as_deref() == Some(old) {
+                t.group = Some(new.to_owned());
+            }
+        }
+        if let Some(id) = self.group_ids.remove(old) {
+            self.group_ids.insert(new.to_owned(), id);
+        }
+    }
+}
+
+/// Unique on this machine: the time in nanoseconds, then a counter for ids
+/// made in the same nanosecond.
+fn new_group_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    format!("{nanos:x}-{:x}", COUNT.fetch_add(1, Ordering::Relaxed))
 }
 
 /// The tab name Bolt gives a directory: its leaf, without a
@@ -164,6 +214,7 @@ pub fn load() -> Settings {
             tabs: Vec::new(),
             pinned: Vec::new(),
             groups: Vec::new(),
+            group_ids: BTreeMap::new(),
             bookmarks: BTreeMap::new(),
             commands: BTreeMap::new(),
             extra: Map::new(),
@@ -176,6 +227,13 @@ pub fn load() -> Settings {
     }
     let pinned: Vec<String> = settings.pinned.iter().map(|t| t.path.clone()).collect();
     settings.tabs.retain(|t| !pinned.contains(&t.path));
+    // An id made here but never written would be a new one next launch,
+    // and the group's memories would stay behind in the old folder.
+    if settings.assign_group_ids()
+        && let Err(e) = save(&settings)
+    {
+        eprintln!("rivet: could not save settings: {e}");
+    }
     settings
 }
 

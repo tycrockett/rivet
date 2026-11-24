@@ -1,14 +1,15 @@
 //! Group memories (`groupSessionStore`'s prompt half, wired in `App`): the
-//! memories live as files in `group-sessions/<home key>/memories`, and an
-//! omp session saves them because Rivet keeps `.omp/APPEND_SYSTEM.md` in
-//! every group home (the group session's instructions) and in every other
-//! tab of a group with a home (the member prompt), excluded from git. Rivet
-//! cannot start group sessions, but groups and membership change here, so
-//! the prompts are rewritten when they do and stale member prompts removed.
+//! memories live as files in the group's folder (`notes::memories_dir`),
+//! and an omp session saves them because Rivet keeps `.omp/APPEND_SYSTEM.md`
+//! in every group home (the group session's instructions) and in every
+//! other tab of a group (the member prompt), excluded from git. A group
+//! needs no home for this: Rivet cannot start group sessions, but groups
+//! and membership change here, so the prompts are rewritten when they do
+//! and stale member prompts removed.
 
 use std::{
     cell::RefCell,
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{
         Mutex,
@@ -36,8 +37,10 @@ const MEMBER_MARK: &str = "<!-- Bolt group member prompt: rewritten by Bolt, del
 
 struct Member {
     group: String,
-    home: String,
+    /// The group's home, when it has one.
+    home: Option<String>,
     path: String,
+    dir: PathBuf,
 }
 
 /// One writer at a time, in the order the changes came (`memberSync`'s
@@ -48,9 +51,8 @@ static WRITES: Mutex<u64> = Mutex::new(0);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Each memory's name and body, newest edit first (`readMemories`).
-fn read_memories(home: &str) -> (String, Vec<(String, String)>) {
-    let dir = memories_dir(home);
-    let memories = md_files(&dir)
+fn read_memories(dir: &Path) -> (String, Vec<(String, String)>) {
+    let memories = md_files(dir)
         .into_iter()
         .map(|(name, path, _)| (name, std::fs::read_to_string(path).unwrap_or_default()))
         .collect();
@@ -96,11 +98,16 @@ fn session_prompt(group: &str, path: &str, branch: &str, repo: &str, dir: &str, 
 }
 
 /// A member is not the group session: it gets the memories, and is told the
-/// group branch and the syncing belong to the home (`groupMemberPrompt`).
-fn member_prompt(group: &str, path: &str, home: &str, dir: &str, memories: &[(String, String)]) -> String {
+/// group branch and the syncing belong to the home, when the group has one
+/// (`groupMemberPrompt`).
+fn member_prompt(group: &str, path: &str, home: Option<&str>, dir: &str, memories: &[(String, String)]) -> String {
+    let role = match home {
+        Some(home) => format!("The group's session runs in its home worktree {home}; the group branch, merging between members and keeping them in sync are its job, not yours, unless the user asks."),
+        None => "Its other workspace tabs are the other slices.".to_owned(),
+    };
     [
         MEMBER_MARK.to_owned(),
-        format!("You are working in a member of the Bolt workspace group \"{group}\": your worktree {path} is one slice of the group's work. The group's session runs in its home worktree {home}; the group branch, merging between members and keeping them in sync are its job, not yours, unless the user asks. Never commit {OMP_PROMPT}."),
+        format!("You are working in a member of the Bolt workspace group \"{group}\": your worktree {path} is one slice of the group's work. {role} Never commit {OMP_PROMPT}."),
         memories_section(dir, memories),
     ]
     .join("\n\n")
@@ -137,8 +144,8 @@ fn remove_omp_prompt(path: &str) {
 }
 
 /// The home's instructions with a fresh memories snapshot (`refreshGroupHome`).
-fn refresh_home(group: &str, path: &str) -> Result<(), String> {
-    let (dir, memories) = read_memories(path);
+fn refresh_home(group: &str, path: &str, dir: &Path) -> Result<(), String> {
+    let (dir, memories) = read_memories(dir);
     let branch = git::current_branch(path)?;
     let repo = git::worktree_context(path)?.main_repo_path;
     write_omp_prompt(path, &session_prompt(group, path, &branch, &repo, &dir, &memories))
@@ -151,8 +158,8 @@ fn write_member(m: &Member) -> Result<(), String> {
             return Err(format!("{} has its own {OMP_PROMPT}; not replacing it with the group's", m.path));
         }
     }
-    let (dir, memories) = read_memories(&m.home);
-    write_omp_prompt(&m.path, &member_prompt(&m.group, &m.path, &m.home, &dir, &memories))
+    let (dir, memories) = read_memories(&m.dir);
+    write_omp_prompt(&m.path, &member_prompt(&m.group, &m.path, m.home.as_deref(), &dir, &memories))
 }
 
 fn clear_member(path: &str) {
@@ -169,10 +176,10 @@ pub fn provide(shell: Shell) {
     let last = Rc::new(RefCell::new((None::<String>, None::<String>, Vec::<String>::new())));
     effect(move || {
         let s = shell.settings.get();
-        let homes: Vec<(String, String)> = s
+        let homes: Vec<(String, String, PathBuf)> = s
             .groups
             .iter()
-            .filter_map(|g| group_home(&s, g).map(|t| (g.clone(), t.path.clone())))
+            .filter_map(|g| group_home(&s, g).and_then(|t| Some((g.clone(), t.path.clone(), memories_dir(&s, g)?))))
             .collect();
         let members: Vec<Member> = s
             .tabs
@@ -180,12 +187,12 @@ pub fn provide(shell: Shell) {
             .filter(|t| !t.home)
             .filter_map(|t| {
                 let group = group_key(t, &s.groups)?;
-                let home = homes.iter().find(|(g, _)| g == group)?;
-                Some(Member { group: group.to_owned(), home: home.1.clone(), path: t.path.clone() })
+                let home = homes.iter().find(|(g, ..)| g == group).map(|h| h.1.clone());
+                Some(Member { group: group.to_owned(), home, path: t.path.clone(), dir: memories_dir(&s, group)? })
             })
             .collect();
-        let home_key = homes.iter().map(|(g, p)| format!("{g}\0{p}")).collect::<Vec<_>>().join("\n");
-        let member_key = members.iter().map(|m| format!("{}\0{}\0{}", m.group, m.home, m.path)).collect::<Vec<_>>().join("\n");
+        let home_key = homes.iter().map(|(g, p, _)| format!("{g}\0{p}")).collect::<Vec<_>>().join("\n");
+        let member_key = members.iter().map(|m| format!("{}\0{}\0{}", m.group, m.home.as_deref().unwrap_or_default(), m.path)).collect::<Vec<_>>().join("\n");
         let mut last = last.borrow_mut();
         let homes_changed = last.0.as_deref() != Some(&home_key);
         let members_changed = last.1.as_deref() != Some(&member_key);
@@ -213,8 +220,8 @@ pub fn provide(shell: Shell) {
             git::off_thread(move || {
                 let mut ran = WRITES.lock().unwrap_or_else(|e| e.into_inner());
                 if write_homes {
-                    for (group, path) in &homes {
-                        if let Err(e) = refresh_home(group, path) {
+                    for (group, path, dir) in &homes {
+                        if let Err(e) = refresh_home(group, path, dir) {
                             eprintln!("rivet: group home {path}: instructions not written: {e}");
                         }
                     }

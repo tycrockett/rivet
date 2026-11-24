@@ -194,8 +194,10 @@ fn next_id() -> u64 {
 
 /// Makes the shell's state and provides it to everything below.
 pub fn provide() -> Shell {
+    let loaded = settings::load();
+    crate::notes::migrate_home_memories(&loaded);
     let shell = Shell {
-        settings: signal(settings::load()),
+        settings: signal(loaded),
         terms: signal(Vec::new()),
         docs: signal(Vec::new()),
         webs: signal(Vec::new()),
@@ -461,7 +463,8 @@ impl Shell {
     }
 
     /// Replaces the settings and writes them to disk.
-    pub fn set_settings(&self, next: Settings) {
+    pub fn set_settings(&self, mut next: Settings) {
+        next.assign_group_ids();
         if let Err(e) = settings::save(&next) {
             eprintln!("rivet: could not save settings: {e}");
         }

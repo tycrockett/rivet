@@ -291,6 +291,7 @@ mod tests {
             tabs,
             pinned: vec![tab("/p", None, false)],
             groups: groups.iter().map(|g| g.to_string()).collect(),
+            group_ids: BTreeMap::new(),
             bookmarks: BTreeMap::new(),
             commands: BTreeMap::new(),
             extra: Default::default(),

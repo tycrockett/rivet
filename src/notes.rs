@@ -4,11 +4,15 @@
 //! written by agents through the `saveNote` tool. Under an omp terminal a
 //! strip shows one tile per note, newest edit first; a note that
 //! @mentions this terminal or its workspace is outlined and moved to the
-//! front. A terminal in a group's home or one of its tabs also gets that
-//! group's memories, as one tile with a count. Tiles that do not fit the
-//! row go behind a ⋯ tile.
+//! front. A terminal in one of a group's tabs, its home included, also
+//! gets that group's memories, as one tile with a count. Tiles that do not
+//! fit the row go behind a ⋯ tile.
 
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use nsh_core::{
     element::{
@@ -21,10 +25,10 @@ use nsh_core::{
 use crate::{
     git,
     hub::{self, TargetKind, engine},
-    settings::{self, Tab},
+    settings::{self, Settings},
     state::{self, Shell},
     theme::{BOLT_THEME, mix},
-    workspace::group_key,
+    workspace::{group_home, group_key},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,7 +51,7 @@ pub struct Memory {
 #[derive(Clone, Copy)]
 pub struct Notes {
     pub notes: Signal<Vec<Note>>,
-    /// Each group home's memories, by the home's path.
+    /// Each group's memories, by the group's name.
     pub memories: Signal<HashMap<String, Vec<Memory>>>,
     /// Terminals running omp: the only ones that show the strip.
     pub omp: Signal<Vec<u64>>,
@@ -71,13 +75,54 @@ pub fn notes_dir() -> PathBuf {
     settings::bolt_data_dir().join("bolt-notes")
 }
 
-/// `group-sessions/<home path, sanitized>/memories` (`groupMemoriesDir`).
-pub fn memories_dir(home: &str) -> PathBuf {
-    let key: String = home
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
-        .collect();
-    settings::bolt_data_dir().join("group-sessions").join(key).join("memories")
+/// A group's memory folder (`groupMemoriesDir`):
+/// `group-sessions/group-<id>/memories`, from the group's id in settings,
+/// so a rename keeps it and a home doesn't change it. None only for a
+/// group with no id, which settings that went through `load` or
+/// `set_settings` never have.
+pub fn memories_dir(s: &Settings, group: &str) -> Option<PathBuf> {
+    Some(id_dir(&sessions_root(), s.group_ids.get(group)?))
+}
+
+fn sessions_root() -> PathBuf {
+    settings::bolt_data_dir().join("group-sessions")
+}
+
+fn id_dir(root: &Path, id: &str) -> PathBuf {
+    root.join(format!("group-{id}")).join("memories")
+}
+
+/// Moves the memories of each group with a home out of Bolt's folder for
+/// them, `group-sessions/<home path, sanitized>/memories`, into the
+/// group's id folder, and deletes the old folder once it is empty. Runs on
+/// every launch, so memories an Electron Bolt session still writes there
+/// come over too. A file whose name the id folder already has stays behind.
+pub fn migrate_home_memories(s: &Settings) {
+    migrate_home_memories_in(&sessions_root(), s);
+}
+
+fn migrate_home_memories_in(root: &Path, s: &Settings) {
+    for g in &s.groups {
+        let (Some(home), Some(id)) = (group_home(s, g), s.group_ids.get(g)) else { continue };
+        let key: String = home.path.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' }).collect();
+        let from = root.join(&key).join("memories");
+        let Ok(entries) = std::fs::read_dir(&from) else { continue };
+        let to = id_dir(root, id);
+        if let Err(e) = std::fs::create_dir_all(&to) {
+            eprintln!("rivet: group {g}: memories not moved to {}: {e}", to.display());
+            continue;
+        }
+        for entry in entries.filter_map(Result::ok) {
+            let dest = to.join(entry.file_name());
+            if dest.exists() {
+                eprintln!("rivet: group {g}: {} kept: {} has a file by that name", entry.path().display(), to.display());
+            } else if let Err(e) = std::fs::rename(entry.path(), &dest) {
+                eprintln!("rivet: group {g}: {} not moved: {e}", entry.path().display());
+            }
+        }
+        let _ = std::fs::remove_dir(&from);
+        let _ = std::fs::remove_dir(root.join(&key));
+    }
 }
 
 /// The @handles in a note (`noteMentions`): `@backend` or `@backend/k3f9`,
@@ -171,11 +216,6 @@ fn read_notes(prev: Vec<Note>) -> Vec<Note> {
         .collect()
 }
 
-/// A group's home: its hidden tab flagged `home` (`groupHomeOf`).
-fn group_home<'a>(tabs: &'a [Tab], group: &str, groups: &[String]) -> Option<&'a Tab> {
-    tabs.iter().find(|t| t.home && t.hidden && group_key(t, groups) == Some(group))
-}
-
 /// Makes the notes state and keeps it current: terminal agents every 1.5s
 /// (Bolt's status poll), the notes and memories every 3s while an omp runs
 /// (`useNotesPoll`).
@@ -196,19 +236,17 @@ pub fn provide(shell: Shell) -> Notes {
             return;
         }
         let prev = notes.notes.get_untracked();
-        let homes: Vec<String> = shell.settings.with_untracked(|s| {
-            s.groups.iter().filter_map(|g| group_home(&s.tabs, g, &s.groups)).map(|t| t.path.clone()).collect()
-        });
+        let dirs: Vec<(String, PathBuf)> = shell.settings.with_untracked(|s| s.groups.iter().filter_map(|g| Some((g.clone(), memories_dir(s, g)?))).collect());
         spawn(async move {
             let (next, memories) = git::off_thread(move || {
-                let memories: HashMap<String, Vec<Memory>> = homes
+                let memories: HashMap<String, Vec<Memory>> = dirs
                     .into_iter()
-                    .map(|h| {
-                        let list = md_files(&memories_dir(&h))
+                    .map(|(group, dir)| {
+                        let list = md_files(&dir)
                             .into_iter()
                             .map(|(name, path, m)| Memory { name, path: path.to_string_lossy().into_owned(), mtime: m })
                             .collect();
-                        (h, list)
+                        (group, list)
                     })
                     .collect();
                 (read_notes(prev), memories)
@@ -260,8 +298,7 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
             let Some(group) = owner.and_then(|t| group_key(t, &s.groups)).map(str::to_owned) else {
                 return (None, Vec::new());
             };
-            let home = group_home(&s.tabs, &group, &s.groups).map(|t| t.path.clone());
-            let memories = home.and_then(|h| state.memories.with(|m| m.get(&h).cloned())).unwrap_or_default();
+            let memories = state.memories.with(|m| m.get(&group).cloned()).unwrap_or_default();
             (Some(group), memories)
         }
     };
@@ -511,5 +548,44 @@ mod tests {
         assert_eq!(body, "do the thing");
         assert_eq!(from.as_deref(), Some("@api · backend (main)"));
         assert_eq!(split_signature("no signature").1, None);
+    }
+
+    #[test]
+    fn a_group_keeps_its_memories_through_a_rename_and_a_new_home() {
+        let mut s: Settings = serde_json::from_str(r#"{"groups": ["a", "b"]}"#).unwrap();
+        s.assign_group_ids();
+        let a = memories_dir(&s, "a").unwrap();
+        assert_ne!(a, memories_dir(&s, "b").unwrap());
+        s.rename_group("a", "c");
+        assert!(!s.assign_group_ids());
+        assert_eq!(memories_dir(&s, "c").unwrap(), a);
+        s.tabs.push(settings::Tab { hidden: true, home: true, group: Some("c".into()), ..settings::Tab::new("home", "/w/c home") });
+        assert_eq!(memories_dir(&s, "c").unwrap(), a);
+    }
+
+    #[test]
+    fn a_homes_memories_move_to_the_id_folder_but_never_over_one_there() {
+        let root = std::env::temp_dir().join(format!("rivet-migrate-{}", std::process::id()));
+        let old = root.join("-w-c-home").join("memories");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("Deploy order.md"), "api first").unwrap();
+        std::fs::write(old.join("Clash.md"), "from the home").unwrap();
+        let mut s: Settings = serde_json::from_str(r#"{"groups": ["c"]}"#).unwrap();
+        s.tabs.push(settings::Tab { hidden: true, home: true, group: Some("c".into()), ..settings::Tab::new("home", "/w/c home") });
+        s.assign_group_ids();
+        let new = id_dir(&root, &s.group_ids["c"]);
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(new.join("Clash.md"), "already here").unwrap();
+
+        migrate_home_memories_in(&root, &s);
+        assert_eq!(std::fs::read_to_string(new.join("Deploy order.md")).unwrap(), "api first");
+        assert_eq!(std::fs::read_to_string(new.join("Clash.md")).unwrap(), "already here");
+        assert_eq!(std::fs::read_to_string(old.join("Clash.md")).unwrap(), "from the home");
+
+        std::fs::remove_file(new.join("Clash.md")).unwrap();
+        migrate_home_memories_in(&root, &s);
+        assert_eq!(std::fs::read_to_string(new.join("Clash.md")).unwrap(), "from the home");
+        assert!(!root.join("-w-c-home").exists());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

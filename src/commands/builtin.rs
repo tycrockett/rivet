@@ -35,18 +35,7 @@ pub fn tab(ctx: &Ctx) -> Result {
                         ctx.add_error("tabGroup", format!("Group {new_name} already exists"));
                         return Ok(());
                     }
-                    shell.update_settings(|s| {
-                        for g in &mut s.groups {
-                            if *g == old {
-                                g.clone_from(&new_name);
-                            }
-                        }
-                        for t in &mut s.tabs {
-                            if t.group.as_ref() == Some(&old) {
-                                t.group = Some(new_name.clone());
-                            }
-                        }
-                    });
+                    shell.update_settings(|s| s.rename_group(&old, &new_name));
                     ctx.add("tabGroup", format!("Renamed group {old} to {new_name}"));
                 } else {
                     ctx.add_error("tabGroup", "Current tab has no group");
