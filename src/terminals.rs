@@ -168,47 +168,12 @@ pub fn terminals() -> impl IntoElement {
                         .child(column(shell, hub, id, joins, bar, layer))
                 })),
         )
-        .child(dynamic(move || layout.with(Vec::is_empty).then(|| empty(shell))))
+        // A workspace with no tabs shows nothing here but the palette beside
+        // it; with the tab rows gone, the blank space moves the window.
+        .child(when(move || layout.with(Vec::is_empty), || view().absolute().inset_0().window_drag(true)))
         .child(layer.view(shell))
         .child(bar.view())
         .child(panes_overlay(shell))
-}
-
-/// A workspace with no tabs: a card with its directory, large, on the
-/// right, beside the palette that stays open meanwhile. It fills the space
-/// a column's terminal box would, under a strip as tall as the tab row;
-/// that strip and the margins move the window, as the tab rows they stand
-/// in for do.
-fn empty(shell: Shell) -> impl IntoElement {
-    view()
-        .absolute()
-        .inset_0()
-        .pt(px(36.0))
-        .px_3()
-        .pb_3()
-        .window_drag(true)
-        .child(
-            view()
-                .flex_1()
-                .min_h(px(0.0))
-                .window_drag(false)
-                .gap_4()
-                .p_6()
-                .rounded(px(12.0))
-                .overflow_hidden()
-                .bg(color(BOLT_THEME.xterm.background))
-                // The terminal box's frame.
-                .border_1()
-                .border_color(color(BOLT_THEME.vars.fg).opacity(0.09))
-                .child(
-                    text(move || crate::paths::tilde(&shell.directory()))
-                        .number_of_lines(1)
-                        .text_right()
-                        .text_size(px(32.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(color(BOLT_THEME.vars.fg)),
-                ),
-        )
 }
 
 /// A column's tab: a terminal, a file, a web page, the Changes or the
@@ -620,12 +585,24 @@ pub fn TermView(props: TermViewProps) -> impl IntoElement {
     });
     // The active column's terminal takes the keys when it shows, when its
     // column becomes active, and when the palette or the pane overlay
-    // closes over it.
+    // closes over it. While the palette is open only a tab or column
+    // chosen since (`focus_pending`) moves them; its opening never does.
+    let palette_open = computed(move || hub.palette.with(Option::is_some));
+    let was_open = Cell::new(palette_open.get_untracked());
     effect(move || {
-        if mounted.get() && column_active.get() && hub.palette.with(Option::is_none) && !shell.panes_overlay.get() {
-            if let Some(api) = tref.api::<TerminalApi>() {
-                api.focus();
-            }
+        let ready = mounted.get() && column_active.get() && !shell.panes_overlay.get();
+        let pending = shell.focus_pending.get();
+        let open = palette_open.get();
+        if open && !was_open.replace(open) {
+            untracked(|| shell.focus_pending.set(false));
+            return;
+        }
+        if ready
+            && (!open || pending)
+            && let Some(api) = tref.api::<TerminalApi>()
+        {
+            api.focus();
+            untracked(|| shell.focus_pending.set(false));
         }
     });
     terminal()

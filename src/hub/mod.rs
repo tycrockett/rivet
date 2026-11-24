@@ -367,6 +367,13 @@ pub fn provide(shell: Shell) -> Hub {
         }
     });
 
+    // The palette taking the keys outranks a tab or column chosen before.
+    effect(move || {
+        if hub.palette_focused.get() {
+            untracked(|| shell.focus_pending.set(false));
+        }
+    });
+
     let last_dir = RefCell::new(shell.settings.with_untracked(|s| s.directory.clone()));
     effect(move || {
         let dir = shell.settings.with(|s| s.directory.clone());

@@ -1,5 +1,5 @@
 //! Bolt's shell in Native Shell: the workspace strip, the terminals of each
-//! workspace, and Bolt's palette (⌘;) over them, driving the command
+//! workspace, and the Rivet palette (⌘;, Bolt's palette) beside them, driving the command
 //! registry and the hub. Settings are Bolt's `settings.json` schema, kept
 //! in this app's own data directory and seeded from Bolt's on first run
 //! (`settings.rs`).

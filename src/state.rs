@@ -143,6 +143,10 @@ pub struct Shell {
     pub collapse_tick: Signal<u64>,
     /// The pane overlay (⌘'), up.
     pub panes_overlay: Signal<bool>,
+    /// A tab or column was chosen (a click, a hint) since the palette last
+    /// took the keys: the active column's terminal takes them, even from
+    /// the open palette, and clears it.
+    pub focus_pending: Signal<bool>,
     /// Bumped by each submit: a command still running when a newer one
     /// starts must not move the directory (`useCommandExecution`'s
     /// `runIdRef`).
@@ -219,6 +223,7 @@ pub fn provide() -> Shell {
         collapse: signal(Collapse::load()),
         collapse_tick: signal(0),
         panes_overlay: signal(false),
+        focus_pending: signal(false),
         run_id: signal(0),
     };
     provide_context(shell);
@@ -855,7 +860,8 @@ impl Shell {
         self.columns.with(|c| c.get(cwd).and_then(Columns::shown))
     }
 
-    /// Shows tab `id` in its column, and makes that column active.
+    /// Shows tab `id` in its column, and makes that column active and its
+    /// terminal take the keys.
     pub fn show(&self, id: u64) {
         let Some(cwd) = self.cwd_of(id) else {
             return;
@@ -865,10 +871,13 @@ impl Shell {
                 cols.show(id);
             }
         });
+        self.focus_pending.set(true);
     }
 
-    /// Makes column `group` of the current workspace active.
+    /// Makes column `group` of the current workspace active, its terminal
+    /// taking the keys.
     pub fn focus_column(&self, group: u64) {
+        self.focus_pending.set(true);
         let dir = self.directory_untracked();
         if self.columns.with_untracked(|c| c.get(&dir).map(|c| c.active_group)) == Some(group) {
             return;

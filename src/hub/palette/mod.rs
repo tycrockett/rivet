@@ -1,4 +1,4 @@
-//! The palette (`components/BoltCompose/BoltPalette.tsx`): ⌘; opens a
+//! The Rivet palette (Bolt's `components/BoltCompose/BoltPalette.tsx`): ⌘; opens a
 //! frame right of the strip, beside the terminals, with the thread and the
 //! input; the line typed is read by [`Env::plan`], which says what sending
 //! it will do.
@@ -14,7 +14,7 @@ use nsh_core::prelude::*;
 use std::time::Duration;
 
 use self::{
-    cards::{FG, FINDER_TONE, faint, mix, muted},
+    cards::{FG, FINDER_TONE, mix, muted},
     editor::{Editor, Item, editor},
 };
 use crate::{
@@ -652,7 +652,6 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
         Rc::new(move || env.send())
     };
     let tab_env = env.clone();
-    let header_tag = self_.as_ref().map(|s| format!("@{}", s.handle)).unwrap_or_else(|| "Bolt".to_owned());
     view()
         .absolute()
         // The column's right edge meets the first terminal column's 12px
@@ -672,8 +671,8 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
         // Nothing drawn past the frame, however narrow the strip is dragged.
         .overflow_hidden()
         .child(
-            // The tag and the close button keep their size; the path between
-            // them is cut to fit (`truncate`).
+            // The directory it speaks from: the terminal's when it speaks as
+            // one, else the workspace's; cut to fit beside the close button.
             view()
                 .flex_row()
                 .items_center()
@@ -682,21 +681,13 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                 .pb_2()
                 .min_w(px(0.0))
                 .child(
-                    text(header_tag)
-                        .uppercase()
-                        .flex_shrink(0.0)
-                        .number_of_lines(1)
-                        .text_size(px(10.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgba(0xffffffb3)),
-                )
-                .child(
-                    text(move || self_path.get().unwrap_or_default())
+                    text(move || self_path.get().unwrap_or_else(|| crate::paths::tilde(&shell.directory())))
                         .flex_1()
                         .min_w(px(0.0))
                         .number_of_lines(1)
-                        .text_size(px(10.0))
-                        .text_color(faint()),
+                        .text_size(px(15.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(FG)),
                 )
                 .child(
                     view()
