@@ -48,12 +48,12 @@ fn native(registry: &mut Registry) {
     registry.register::<App>();
 }
 
-/// The shell: the strip on the left, with the palette over its list when
-/// open, the current workspace's columns on the right, the PR bar above
-/// the columns. The boundary between strip and
-/// terminals drags (Bolt's `useSplitPane`): the strip keeps at least 100
-/// points and leaves the terminals at least 300, and the width it is left
-/// at is saved on release.
+/// The shell: the strip on the left, the palette right of it when open,
+/// the current workspace's columns on the right, the PR bar above the
+/// columns. The boundaries between them drag (Bolt's `useSplitPane`): the
+/// strip keeps at least 100 points, the palette at least 240 (400 until
+/// dragged), the terminals at least 300, and the widths they are left at
+/// are saved on release.
 #[component]
 pub fn App() -> impl IntoElement {
     // Bolt's editor theme for NSH's own tokens, before anything reads them.
@@ -75,7 +75,8 @@ pub fn App() -> impl IntoElement {
     for path in paths {
         shell.refresh_status(path);
     }
-    let width = signal(sidebar_width());
+    let width = signal(saved_width(SIDEBAR_WIDTH_FILE, &[settings::data_dir(), settings::bolt_data_dir()]).unwrap_or(300.0));
+    let palette_width = signal(saved_width(PALETTE_WIDTH_FILE, &[settings::data_dir()]).unwrap_or(400.0));
     view()
         .flex_1()
         .relative()
@@ -84,7 +85,7 @@ pub fn App() -> impl IntoElement {
                 .flex_1()
                 .bg(move || theme().sidebar)
                 .text_color(move || theme().foreground)
-                .handle_accessibility_label("Resize the sidebar")
+                .handle_accessibility_label("Resize the sidebar or the palette")
                 .child(
                     resizable_panel()
                         .size(move || Some(px(width.get())))
@@ -93,9 +94,22 @@ pub fn App() -> impl IntoElement {
                         .visible(shell.sidebar_open)
                         .on_resize(move |w: &Points| {
                             width.set(w.0);
-                            save_sidebar_width(w.0);
+                            save_width(SIDEBAR_WIDTH_FILE, w.0, "sidebar");
                         })
                         .child(sidebar::sidebar()),
+                )
+                // The palette, right of the strip while open.
+                .child(
+                    resizable_panel()
+                        .size(move || Some(px(palette_width.get())))
+                        .min_size(px(240.0))
+                        .fixed(true)
+                        .visible(move || hub.palette.with(Option::is_some))
+                        .on_resize(move |w: &Points| {
+                            palette_width.set(w.0);
+                            save_width(PALETTE_WIDTH_FILE, w.0, "palette");
+                        })
+                        .child(view().flex_1().relative().child(hub::palette::palette())),
                 )
                 .child(
                     resizable_panel()
@@ -107,26 +121,27 @@ pub fn App() -> impl IntoElement {
         .child(hints::overlay(hints))
 }
 
+/// The strip's width (`{ width }`), as Bolt saves it.
 const SIDEBAR_WIDTH_FILE: &str = "left-pane-width.json";
+/// The palette's width, saved the same way.
+const PALETTE_WIDTH_FILE: &str = "palette-width.json";
 
-/// The width the strip was left at (`left-pane-width.json`, `{ width }`):
-/// this app's, else the Electron Bolt's, else Bolt's default 300.
-fn sidebar_width() -> f32 {
-    [settings::data_dir(), settings::bolt_data_dir()]
-        .iter()
-        .find_map(|d| {
-            let text = std::fs::read_to_string(d.join(SIDEBAR_WIDTH_FILE)).ok()?;
-            serde_json::from_str::<serde_json::Value>(&text).ok()?.get("width")?.as_f64()
-        })
-        .map_or(300.0, |w| w as f32)
+/// The width saved in `file` (`{ width }`) in the first of `dirs` that has
+/// one: the strip's in this app's, else the Electron Bolt's; the palette's
+/// in this app's.
+fn saved_width(file: &str, dirs: &[std::path::PathBuf]) -> Option<f32> {
+    dirs.iter().find_map(|d| {
+        let text = std::fs::read_to_string(d.join(file)).ok()?;
+        serde_json::from_str::<serde_json::Value>(&text).ok()?.get("width")?.as_f64().map(|w| w as f32)
+    })
 }
 
-fn save_sidebar_width(width: f32) {
+fn save_width(file: &str, width: f32, what: &str) {
     let dir = settings::data_dir();
     let write = std::fs::create_dir_all(&dir)
-        .and_then(|()| std::fs::write(dir.join(SIDEBAR_WIDTH_FILE), serde_json::json!({ "width": width.round() }).to_string()));
+        .and_then(|()| std::fs::write(dir.join(file), serde_json::json!({ "width": width.round() }).to_string()));
     if let Err(e) = write {
-        eprintln!("rivet: could not save the sidebar width: {e}");
+        eprintln!("rivet: could not save the {what} width: {e}");
     }
 }
 

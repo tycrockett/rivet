@@ -320,15 +320,10 @@ pub struct Editor {
     pub close: Rc<dyn Fn()>,
     /// What the empty input says: the finder's lines while it is open.
     pub placeholder: Memo<&'static str>,
-    /// Whether its Tab and Escape are bound: they are global, so an input
-    /// under the palette lets the palette's have them.
-    pub keys: Memo<bool>,
-    /// Focused when it appears.
-    pub auto_focus: bool,
 }
 
 pub fn editor(e: Editor) -> impl IntoElement {
-    let Editor { value, commands, scripts, targets, files, on_enter, on_tab, input_ref, lead, close, placeholder, keys, auto_focus } = e;
+    let Editor { value, commands, scripts, targets, files, on_enter, on_tab, input_ref, lead, close, placeholder } = e;
     let commands = Rc::new(commands);
     let caret = signal(0_usize);
     let sel = signal(0_usize);
@@ -370,9 +365,9 @@ pub fn editor(e: Editor) -> impl IntoElement {
         }
     };
 
-    let bind_keys = move || {
+    on_key_with("tab", KeyOptions { when: When::Always, ..Default::default() }, {
         let on_tab = on_tab.clone();
-        on_key_with("tab", KeyOptions { when: When::Always, ..Default::default() }, move |_| {
+        move |_| {
             if let Some(m) = open.get_untracked() {
                 let s = m.items[sel.get_untracked().min(m.items.len() - 1)].clone();
                 accept(&s);
@@ -384,17 +379,15 @@ pub fn editor(e: Editor) -> impl IntoElement {
                 caret.set(units as usize);
                 force.set((units, units));
             }
-        });
-        let close = close.clone();
-        on_key_with("escape", KeyOptions { when: When::Always, ..Default::default() }, move |_| {
-            if let Some(m) = open.get_untracked() {
-                dismissed.set(Some(m.from));
-            } else {
-                close();
-            }
-        });
-        view()
-    };
+        }
+    });
+    on_key_with("escape", KeyOptions { when: When::Always, ..Default::default() }, move |_| {
+        if let Some(m) = open.get_untracked() {
+            dismissed.set(Some(m.from));
+        } else {
+            close();
+        }
+    });
 
     let submit = {
         let on_enter = on_enter.clone();
@@ -444,7 +437,6 @@ pub fn editor(e: Editor) -> impl IntoElement {
         .relative()
         .on_layout(move |b: &Bounds<Points>| field.set(b.size.width.0))
         .child(view().absolute().top_0().left_0().right_0().px(px(10.0)).py(px(8.0)).child(backdrop))
-        .child(when(move || keys.get(), bind_keys))
         .child(
             input()
                 .element_ref(&input_ref)
@@ -462,7 +454,7 @@ pub fn editor(e: Editor) -> impl IntoElement {
                 .on_caret_move(move |c: &CaretEvent| caret_x.set(c.bounds.origin.x.0))
                 .on_content_size_change(move |s: &Size<Points>| height.set((s.height.0 + 16.0).clamp(44.0, 160.0)))
                 .selected_range(move || force.get())
-                .auto_focus(auto_focus)
+                .auto_focus(true)
                 .auto_correct(false)
                 .auto_capitalize(AutoCapitalize::None)
                 .placeholder(move || placeholder.get().to_owned())

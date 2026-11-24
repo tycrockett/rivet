@@ -302,29 +302,21 @@ pub fn sidebar() -> impl IntoElement {
                 .pl(move || px(nsh_core::element::desktop::title_bar().left.0 + 8.0))
                 .child(cycle_dots(shell)),
         )
-        // The list, with the palette over it when open: Bolt's left pane
-        // holds `BoltPalette` in the area between its tabs and its footer,
-        // inset over the workspaces.
-        .child(
-            view()
-                .relative()
-                .flex_1()
-                .child({
-                    // The rows with terminals, as a set: the strip is drawn
-                    // again when one gains or loses its first terminal, not
-                    // on every title change.
-                    let chipped = computed(move || shell.chipped_paths());
-                    let live = Live::start(shell);
-                    // Rows scrolled out of the list get no ⌘⏎ label.
-                    let list = element_ref();
-                    scroll().element_ref(&list).flex_1().child(view().py_2().child(dynamic(move || {
-                        let s = shell.settings.get();
-                        let c = shell.collapse.get();
-                        chipped.with(|chipped| strip(hub, live, &s, &c, chipped, list))
-                    })))
-                })
-                .child(hub::palette::palette()),
-        )
+        // The list.
+        .child({
+            // The rows with terminals, as a set: the strip is drawn again
+            // when one gains or loses its first terminal, not on every
+            // title change.
+            let chipped = computed(move || shell.chipped_paths());
+            let live = Live::start(shell);
+            // Rows scrolled out of the list get no ⌘⏎ label.
+            let list = element_ref();
+            scroll().element_ref(&list).flex_1().child(view().py_2().child(dynamic(move || {
+                let s = shell.settings.get();
+                let c = shell.collapse.get();
+                chipped.with(|chipped| strip(hub, live, &s, &c, chipped, list))
+            })))
+        })
         .child(footer(shell))
 }
 

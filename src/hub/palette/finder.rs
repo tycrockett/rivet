@@ -1,22 +1,12 @@
-//! The finder's lines, which the palette's finder and a workspace with no
-//! tabs share, and the finder on its own: the palette's finder panel over
-//! an input whose lines go to the finder alone.
+//! The finder's lines: what it filters by, its Tab completion, and what
+//! each line does.
 
 use std::rc::Rc;
 
 use nsh_core::prelude::*;
 
-use super::{
-    Plan,
-    cards::{self, FINDER_TONE, mix},
-    editor::{Editor, editor},
-    json, send_row, spawn_detached,
-};
-use crate::{
-    commands,
-    hub::{finder_matches, hub},
-    state::Shell,
-};
+use super::{Plan, json};
+use crate::{hub::finder_matches, state::Shell};
 
 /// What the finder's lines do, as its empty line says.
 pub(super) const HELP: &str = "folder name or cd <path> · .. · ~ · mkdir <name> · tab [<folder>] · bm <name> · bm add|rm <name>";
@@ -79,8 +69,7 @@ pub(super) fn complete(text: Signal<String>, folders: &[String]) {
 }
 
 /// What a finder line does (`plan`'s finder branch), past the empty line
-/// and `exit`, which each finder reads its own way. `nav` makes the send
-/// that runs its lines in turn.
+/// and `exit`. `nav` makes the send that runs its lines in turn.
 pub(super) fn plan(shell: Shell, t: &str, nav: impl Fn(Vec<String>) -> Rc<dyn Fn()>) -> Plan {
     let sends = |say: String, cmds: Vec<String>| {
         let go = nav(cmds);
@@ -135,88 +124,4 @@ pub(super) fn plan(shell: Shell, t: &str, nav: impl Fn(Vec<String>) -> Rc<dyn Fn
         return sends(format!("goes to {to}"), vec![format!("cd {} --absolute", json(to))]);
     }
     sends(format!("goes to {to}"), vec![format!("cd {}", json(to))])
-}
-
-/// The finder on its own, unframed, filling what holds it: its folders
-/// grow and its input sits at the bottom. Its Tab and Escape are the
-/// palette's while the palette is open, and it takes the focus only when
-/// the palette does not have it.
-pub fn finder(shell: Shell) -> impl IntoElement {
-    let hub = hub();
-    let typed = signal(String::new());
-    let folders = signal(Vec::<String>::new());
-    // Bumped after each line ran, which makes the panel again: it re-reads
-    // the folders and the bookmarks.
-    let n = signal(0_u32);
-    let input_ref = element_ref();
-    let query = computed(move || query(&typed.get()));
-    // Detached: a `tab` takes this view away before its lines are done.
-    let go: Rc<dyn Fn(Vec<String>)> = Rc::new(move |cmds| {
-        spawn_detached(async move {
-            for c in cmds {
-                commands::run(shell, c, None).await;
-            }
-            if let Some(v) = n.try_get() {
-                n.try_set(v + 1);
-            }
-        })
-    });
-    let line: Rc<dyn Fn(&str) -> Plan> = {
-        let go = go.clone();
-        Rc::new(move |t| {
-            if t.is_empty() {
-                return Plan::says(HELP);
-            }
-            plan(shell, t, |cmds| {
-                let go = go.clone();
-                Rc::new(move || go(cmds.clone()))
-            })
-        })
-    };
-    let said = {
-        let line = line.clone();
-        computed(move || {
-            let p = line(typed.get().trim());
-            (p.say, p.send.is_some())
-        })
-    };
-    let send: Rc<dyn Fn()> = Rc::new(move || {
-        let Some(send) = line(typed.get_untracked().trim()).send else {
-            return;
-        };
-        send();
-        if typed.try_set(String::new()) {
-            input_ref.focus();
-        }
-    });
-    let panel = dynamic(move || {
-        n.get();
-        let go = go.clone();
-        untracked(move || cards::finder_panel(shell, query, folders, go, false, true))
-    });
-    let palette_closed = move || hub.palette.with(Option::is_none);
-    view()
-        .flex_1()
-        .min_h(px(0.0))
-        .gap_2()
-        .child(panel)
-        .child(editor(Editor {
-            value: typed,
-            commands: Vec::new(),
-            scripts: computed(Vec::new),
-            targets: computed(Vec::new),
-            files: signal(Rc::new(Vec::new())),
-            on_enter: send.clone(),
-            on_tab: Rc::new(move || {
-                complete(typed, &folders.get_untracked());
-                true
-            }),
-            close: Rc::new(move || typed.set(String::new())),
-            input_ref,
-            lead: computed(|| 0),
-            placeholder: computed(|| "folder name, cd <path> or .."),
-            keys: computed(palette_closed),
-            auto_focus: untracked(palette_closed),
-        }))
-        .child(send_row(move || said.get().0, move || said.get().1, typed, send, mix(FINDER_TONE, 0x000000, 0.25)))
 }

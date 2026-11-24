@@ -1,13 +1,12 @@
 //! The palette (`components/BoltCompose/BoltPalette.tsx`): ⌘; opens a
-//! frame over the terminals with the thread and the input; the line typed
-//! is read by [`Env::plan`], which says what sending it will do.
+//! frame right of the strip, beside the terminals, with the thread and the
+//! input; the line typed is read by [`Env::plan`], which says what sending
+//! it will do.
 
 mod cards;
 mod editor;
 mod finder;
 mod help;
-
-pub use finder::finder;
 
 use std::{cell::RefCell, collections::HashMap, future::Future, rc::Rc};
 
@@ -40,7 +39,8 @@ fn spawn_detached(f: impl Future<Output = ()> + 'static) {
     });
 }
 
-/// The palette while open; `PaletteOpen::n` remakes it.
+/// The palette while open, filling the panel right of the strip that
+/// holds it (`lib.rs`); nothing while closed. `PaletteOpen::n` remakes it.
 pub fn palette() -> impl IntoElement {
     let hub = hub();
     dynamic(move || {
@@ -638,7 +638,7 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                     return view().into_element();
                 }
                 let go: Rc<dyn Fn(Vec<String>)> = Rc::new(move |cmds| env.navigate(cmds, None));
-                cards::finder_panel(shell, query, folders, go, true, false)
+                cards::finder_panel(shell, query, folders, go)
             })
         })
     };
@@ -651,7 +651,13 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
     let header_tag = self_.as_ref().map(|s| format!("@{}", s.handle)).unwrap_or_else(|| "Bolt".to_owned());
     view()
         .absolute()
-        .inset(px(8.0))
+        // The column's right edge meets the first terminal column's 12px
+        // padding; its top clears the traffic lights while the strip that
+        // holds them is hidden.
+        .top(move || if shell.sidebar_open.get() { px(8.0) } else { nsh_core::element::desktop::title_bar().top })
+        .left(px(8.0))
+        .right_0()
+        .bottom(px(12.0))
         .flex_col()
         .p_3()
         .rounded(px(RADIUS))
@@ -750,8 +756,6 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                     input_ref,
                     lead,
                     placeholder,
-                    keys: computed(|| true),
-                    auto_focus: true,
                 }))
                 .child(send_row(move || said.get().0, move || said.get().1, typed, send_env, rgb(color))),
         )

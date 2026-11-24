@@ -122,6 +122,13 @@ pub fn terminals() -> impl IntoElement {
         current(shell);
         layer.measure();
     });
+    // A workspace with no tabs keeps the palette open, to go somewhere or
+    // start something: closing it opens it again.
+    effect(move || {
+        if layout.with(Vec::is_empty) && hub.palette.with(Option::is_none) {
+            untracked(|| hub.toggle_palette());
+        }
+    });
     view()
         .flex_1()
         .bg(move || nsh_base::theme().sidebar)
@@ -167,10 +174,11 @@ pub fn terminals() -> impl IntoElement {
         .child(panes_overlay(shell))
 }
 
-/// A workspace with no tabs: a card with its directory, large, over the
-/// finder, to go somewhere and add a tab. It fills the space a column's
-/// terminal box would, under a strip as tall as the tab row; that strip
-/// and the margins move the window, as the tab rows they stand in for do.
+/// A workspace with no tabs: a card with its directory, large, on the
+/// right, beside the palette that stays open meanwhile. It fills the space
+/// a column's terminal box would, under a strip as tall as the tab row;
+/// that strip and the margins move the window, as the tab rows they stand
+/// in for do.
 fn empty(shell: Shell) -> impl IntoElement {
     view()
         .absolute()
@@ -195,11 +203,11 @@ fn empty(shell: Shell) -> impl IntoElement {
                 .child(
                     text(move || crate::paths::tilde(&shell.directory()))
                         .number_of_lines(1)
+                        .text_right()
                         .text_size(px(32.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(color(BOLT_THEME.vars.fg)),
-                )
-                .child(hub::palette::finder(shell)),
+                ),
         )
 }
 

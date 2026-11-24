@@ -353,10 +353,7 @@ pub fn provide(shell: Shell) -> Hub {
     });
 
     effect(move || {
-        let open = hub.palette.with(Option::is_some);
-        if open {
-            hub.shell.sidebar_open.set(true);
-        } else {
+        if hub.palette.with(Option::is_none) {
             untracked(|| {
                 hub.cancel_choices();
                 hub.close_finders();
