@@ -95,6 +95,12 @@ pub const REGISTRY: &[Command] = &[
     cmd("ls", Kind::Terminal, true),
 ];
 
+/// A command that navigates: the palette keeps open for it, runs it only
+/// in the finder, and neither `/` nor `/help` lists it (`NAV`).
+pub fn is_nav(cmd: &str) -> bool {
+    matches!(cmd.split_whitespace().next().unwrap_or("").to_lowercase().as_str(), "cd" | ".." | "mkdir")
+}
+
 /// Commands that show nothing in the palette, so it closes once they ran
 /// (`NON_RESULT_COMMANDS`).
 pub fn is_non_result(input: &str) -> bool {

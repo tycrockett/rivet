@@ -18,7 +18,7 @@ use self::{
     editor::{Editor, Item, editor},
 };
 use crate::{
-    commands::{self, REGISTRY},
+    commands::{self, REGISTRY, is_nav},
     hub::{
         ComposeSelf, Hub, HubEntry, HubTarget, JobStatus, ME, PaletteOpen, engine, finder_matches, hub, next_id, parse_post,
         targets as hub_targets,
@@ -91,11 +91,6 @@ struct Env {
 
 fn json(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_default()
-}
-
-/// A line whose command navigates: it keeps the palette open (`NAV`).
-fn is_nav(cmd: &str) -> bool {
-    matches!(cmd.split_whitespace().next().unwrap_or("").to_lowercase().as_str(), "cd" | ".." | "mkdir")
 }
 
 /// `^[/@#:]`.
@@ -333,6 +328,10 @@ impl Env {
                     env.navigate(vec![format!("cd {} --absolute", json(&path))], None);
                 });
             }
+            // Navigation runs in the finder; outside it `/cd` says where.
+            if is_nav(word) && self.open_finder().is_none() {
+                return Plan::says(format!("/{word} runs in the finder · /finder opens it"));
+            }
             let env = self.clone();
             if self.registry.iter().any(|r| r == word) {
                 let rest = rest.to_owned();
@@ -414,7 +413,8 @@ fn slash_menu(shell: Shell) -> (Vec<String>, Vec<Item>) {
         seen.push(keyword.clone());
         out.push(Item { keyword, hint });
     };
-    for name in &registry {
+    // Navigation runs in the finder, so `/` does not offer it.
+    for name in registry.iter().filter(|n| !is_nav(n)) {
         add(name.clone(), help::description(name).to_owned());
     }
     add("finder".into(), "Browse folders, change directory, add tabs · /finder <bookmark> opens there".into());

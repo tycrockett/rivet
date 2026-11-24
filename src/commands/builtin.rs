@@ -163,7 +163,7 @@ pub fn help(ctx: &Ctx) -> Result {
     let section = |kind: Kind, title: &str| {
         let names: Vec<String> = REGISTRY
             .iter()
-            .filter(|c| c.kind == kind)
+            .filter(|c| c.kind == kind && !super::is_nav(c.name))
             .map(|c| if c.ported { c.name.to_owned() } else { format!("({})", c.name) })
             .collect();
         format!("{title}: {}", names.join(" "))
