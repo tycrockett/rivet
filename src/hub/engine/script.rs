@@ -19,7 +19,7 @@ use crate::{
 use super::{
     ComposeSelf, agents,
     fleet::{self, agent_command, expand_board_refs, hub_members, new_job, open_workspace_terminal, patch_job, say, say_error, submit_post},
-    hop::{HopResult, Role, fork_from, is_cancelled, kill_hops, mark_cancelled, run_hop},
+    hop::{HopResult, HopSpec, Role, fork_from, is_cancelled, kill_hops, mark_cancelled, run_hop},
     send::{self, Readiness, dispatch_to_terminals, readiness, status_by_session},
     types::{
         BoltNode, FetchMode, FetchType, IfOp, InAppAction, SendMode, Var, Vars, answer_tail, fill, fill_plain, list_of, match_command, new_id, palette_safe,
@@ -251,25 +251,26 @@ fn terminal_tail(hub: Hub, session_id: &str, lines: usize) -> String {
     all[all.len().saturating_sub(lines)..].join("\n").trim().to_owned()
 }
 
-fn claude_pid_of(hub: Hub, session_id: &str) -> Option<u32> {
-    let info = status_by_session(hub.shell, session_id)?;
-    info.agent_pid.filter(|_| info.agent.as_deref() == Some("claude"))
+/// The latest message of a terminal's agent, from its transcript; none for
+/// a shell or an agent whose session can't be read.
+fn agent_message(hub: Hub, session_id: &str) -> Option<String> {
+    agents::last_message(&status_by_session(hub.shell, session_id)?)
 }
 
 /// A shell has no message boundary, so its latest message is its last 40 lines minus the prompt (`readLatest`).
 fn read_latest(hub: Hub, session_id: &str) -> String {
-    if let Some(pid) = claude_pid_of(hub, session_id) {
-        return agents::last_claude_message(pid);
+    if let Some(message) = agent_message(hub, session_id) {
+        return message;
     }
     let tail = terminal_tail(hub, session_id, 41);
     let lines: Vec<&str> = tail.split('\n').collect();
     lines[..lines.len() - 1].join("\n").trim().to_owned()
 }
 
-/// A shell's output is what follows the last echo of the command, minus the fresh prompt; claude's is its last message.
+/// A shell's output is what follows the last echo of the command, minus the fresh prompt; an agent's is its last message.
 fn output_of(hub: Hub, session_id: &str, text: &str) -> String {
-    if let Some(pid) = claude_pid_of(hub, session_id) {
-        return agents::last_claude_message(pid);
+    if let Some(message) = agent_message(hub, session_id) {
+        return message;
     }
     let tail = terminal_tail(hub, session_id, 400);
     let lines: Vec<&str> = tail.split('\n').collect();
@@ -553,7 +554,7 @@ async fn fetch_node(
         parse_answer(&text, key, t).ok_or_else(|| format!("no \"{key}\" in {who}: {}", last_chars(&text, 200)))
     };
     if mode == FetchMode::Fresh {
-        let hop = run_hop(&hub.shell.directory(), &prompt, None, Some(job_id)).await;
+        let hop = run_hop(&hub.shell.directory(), &prompt, HopSpec::fresh(hub.shell), Some(job_id)).await;
         if let Some(e) = hop.error {
             return Err(e);
         }
@@ -561,15 +562,15 @@ async fn fetch_node(
     }
     let member = members_of(hub, target, vars)?.into_iter().next().ok_or("no target")?;
     let text = if mode == FetchMode::Live {
-        let pid = member.session_id.as_deref().and_then(|s| claude_pid_of(hub, s));
-        let (Some(session_id), Some(pid)) = (member.session_id.as_deref(), pid) else {
-            return Err(format!("@{} has no live claude session", member.handle));
+        let session_id = member.session_id.as_deref().filter(|s| status_by_session(hub.shell, s).is_some_and(|i| i.agent_transcript.is_some()));
+        let Some(session_id) = session_id else {
+            return Err(format!("@{} has no live agent session", member.handle));
         };
         type_(hub, session_id, &prompt).await?;
-        agents::last_claude_message(pid)
+        agent_message(hub, session_id).unwrap_or_default()
     } else {
-        let resume = fork_from(hub.shell, &member, Role::Addressee);
-        let hop = run_hop(&member.cwd, &prompt, resume, Some(job_id)).await;
+        let spec = fork_from(hub.shell, &member, Role::Addressee).unwrap_or_else(|| HopSpec::fresh(hub.shell));
+        let hop = run_hop(&member.cwd, &prompt, spec, Some(job_id)).await;
         if let Some(e) = hop.error {
             return Err(e);
         }
@@ -673,8 +674,8 @@ async fn run_node(hub: Hub, job_id: &str, node: &BoltNode, vars: &mut Vars, at: 
                     .map(|m| {
                         let (text, job) = (text.clone(), job_id.to_owned());
                         Box::pin(async move {
-                            let resume = fork_from(hub.shell, &m, Role::Addressee);
-                            let hop = run_hop(&m.cwd, &text, resume, Some(&job)).await;
+                            let spec = fork_from(hub.shell, &m, Role::Addressee).unwrap_or_else(|| HopSpec::fresh(hub.shell));
+                            let hop = run_hop(&m.cwd, &text, spec, Some(&job)).await;
                             match hop.error {
                                 Some(e) => Err(format!("@{}: {e}", m.handle)),
                                 None => Ok(hop.text),
@@ -816,7 +817,7 @@ async fn run_script(hub: Hub, label: String, script: String, text: String, mut v
 fn finish_hop(hub: Hub, job_id: &str, at: usize, hop: &HopResult, cwd: &str) {
     let said = hop.text.trim().split('\n').next_back().unwrap_or_default().to_owned();
     close_step(hub, job_id, at, if hop.error.is_some() { StepStatus::Failed } else { StepStatus::Done }, hop.error.as_deref().unwrap_or(&said));
-    let hop_ref = hop.session_id.as_ref().map(|s| Hop { session_id: s.clone(), cwd: cwd.to_owned() });
+    let hop_ref = hop.session_id.as_ref().map(|s| Hop { session_id: s.clone(), cwd: cwd.to_owned(), harness: hop.harness });
     patch_job(hub, job_id, |j| {
         if hop_ref.is_some() {
             *j.hop = hop_ref;
@@ -827,7 +828,7 @@ fn finish_hop(hub: Hub, job_id: &str, at: usize, hop: &HopResult, cwd: &str) {
     });
 }
 
-/// `@bolt …` (`chatBoltAtom`): a leading @terminal forks its claude; a
+/// `@bolt …` (`chatBoltAtom`): a leading @terminal forks its agent; a
 /// @workspace or no handle is a fresh session there.
 pub async fn chat_bolt(hub: Hub, text: String) {
     let all = targets(hub.shell);
@@ -843,26 +844,26 @@ pub async fn chat_bolt(hub: Hub, text: String) {
     let fail = |error: String| finish_job(hub, &job_id, Some(error));
     let cwd = hub.shell.directory();
     let mut run_in = cwd.clone();
-    let mut resume = None;
+    let mut spec = HopSpec::fresh(hub.shell);
     if let Some(to) = &to {
         let Some(member) = all.iter().find(|t| &t.handle == to).and_then(|t| t.members.first().cloned()) else {
             return fail(format!("no target @{to}"));
         };
         run_in = member.cwd.clone();
         if member.session_id.is_some() {
-            resume = fork_from(hub.shell, &member, Role::Addressee);
-            if resume.is_none() {
-                return fail(format!("@{to} has no claude running to fork"));
-            }
+            let Some(fork) = fork_from(hub.shell, &member, Role::Addressee) else {
+                return fail(format!("@{to} has no claude or codex running to fork"));
+            };
+            spec = fork;
         }
     }
-    let at = open_step(hub, &job_id, "claude", StepStatus::Running);
+    let at = open_step(hub, &job_id, spec.harness.id(), StepStatus::Running);
     let hop = run_hop(
         &run_in,
         &format!(
-            "You are driving the Bolt IDE open at {cwd}. Do this using only the mcp__bolt__* tools, passing cwd \"{cwd}\". A \"tab\" means a workspace tab on its own branch and worktree: create whichever of the three is missing, with createWorktrees. Then reply with one line saying what you did:\n\n{prompt}"
+            "You are driving the Bolt IDE open at {cwd}. Do this using only the tools of the bolt MCP server, passing cwd \"{cwd}\". A \"tab\" means a workspace tab on its own branch and worktree: create whichever of the three is missing, with createWorktrees. Then reply with one line saying what you did:\n\n{prompt}"
         ),
-        resume,
+        spec,
         Some(&job_id),
     )
     .await;
@@ -889,8 +890,8 @@ pub async fn reply_bolt(hub: Hub, job_id: String, text: String) {
     });
     let you = open_step(hub, &job_id, "you", StepStatus::Running);
     close_step(hub, &job_id, you, StepStatus::Done, &text);
-    let at = open_step(hub, &job_id, "claude", StepStatus::Running);
-    let result = run_hop(&hop.cwd, &text, Some(hop.session_id.clone()), Some(&job_id)).await;
+    let at = open_step(hub, &job_id, hop.harness.id(), StepStatus::Running);
+    let result = run_hop(&hop.cwd, &text, HopSpec { harness: hop.harness, resume: Some(hop.session_id.clone()) }, Some(&job_id)).await;
     finish_hop(hub, &job_id, at, &result, &hop.cwd);
 }
 

@@ -41,7 +41,7 @@ pub const HELP: &[(&str, &str, &[&str])] = &[
     ("settings", "View and edit settings", &[]),
     ("repo", "Repo config: files symlinked into new worktrees, post-create commands", &[]),
     ("diff", "Review file changes", &["--commit <hash>", "--since <hash>"]),
-    ("bolt", "Ask a new claude to drive Bolt: bolt [@handle] <request>", &[]),
+    ("bolt", "Ask a new agent to drive Bolt: bolt [@handle] <request>", &[]),
     ("clear", "Clear results, keep the palette open", &[]),
     ("close", "Close the command palette", &[]),
     ("help", "Browse commands by category", &[]),

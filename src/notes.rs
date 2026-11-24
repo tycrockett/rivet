@@ -1,7 +1,7 @@
 //! Rivet notes (Bolt's `notesStore`, `useNotesPoll`, `NotesStrip`): `.md`
 //! files in the Electron Bolt's `bolt-notes` folder, shared by every
 //! terminal and by both apps (so the folder keeps Bolt's name), and
-//! written by agents through the `saveNote` tool. Under an omp terminal a
+//! written by agents through the `saveNote` tool. Under an agent's terminal a
 //! strip shows one tile per note, newest edit first; a note that
 //! @mentions this terminal or its workspace is outlined and moved to the
 //! front. A terminal in one of a group's tabs, its home included, also
@@ -53,8 +53,8 @@ pub struct Notes {
     pub notes: Signal<Vec<Note>>,
     /// Each group's memories, by the group's name.
     pub memories: Signal<HashMap<String, Vec<Memory>>>,
-    /// Terminals running omp: the only ones that show the strip.
-    pub omp: Signal<Vec<u64>>,
+    /// Terminals running an agent: the only ones that show the strip.
+    pub agents: Signal<Vec<u64>>,
     /// Bumped to re-read the folders now rather than at the next 3s poll
     /// (`refreshNotesAtom` after `saveNote`).
     tick: Signal<u32>,
@@ -217,22 +217,22 @@ fn read_notes(prev: Vec<Note>) -> Vec<Note> {
 }
 
 /// Makes the notes state and keeps it current: terminal agents every 1.5s
-/// (Bolt's status poll), the notes and memories every 3s while an omp runs
+/// (Bolt's status poll), the notes and memories every 3s while an agent runs
 /// (`useNotesPoll`).
 pub fn provide(shell: Shell) -> Notes {
     let tick = signal(0_u32);
-    let notes = Notes { notes: signal(Vec::new()), memories: signal(HashMap::new()), omp: signal(Vec::new()), tick };
+    let notes = Notes { notes: signal(Vec::new()), memories: signal(HashMap::new()), agents: signal(Vec::new()), tick };
     provide_context(notes);
     PROVIDED.with(|p| p.set(Some(notes)));
     set_interval(Duration::from_millis(1500), move || {
         let ids: Vec<u64> = shell.terms.with_untracked(|t| t.iter().map(|t| t.id).collect());
-        let omp: Vec<u64> = ids.into_iter().filter(|id| engine::terminal_status(*id).agent.as_deref() == Some("omp")).collect();
-        notes.omp.set(omp);
+        let agents: Vec<u64> = ids.into_iter().filter(|id| engine::terminal_status(*id).agent.is_some()).collect();
+        notes.agents.set(agents);
     });
     set_interval(Duration::from_millis(3000), move || tick.update(|n| *n += 1));
     effect(move || {
         tick.get();
-        if notes.omp.with(Vec::is_empty) {
+        if notes.agents.with(Vec::is_empty) {
             return;
         }
         let prev = notes.notes.get_untracked();
@@ -266,8 +266,8 @@ pub fn notes() -> Notes {
 const TILE_GAP: f32 = 6.0;
 const MORE_WIDTH: f32 = 24.0;
 const TILE_MAX: f32 = 180.0;
-const OMP_START_TIMEOUT_MS: f64 = 30_000.0;
-const OMP_READY_CHECK_MS: u64 = 250;
+const AGENT_START_TIMEOUT_MS: f64 = 30_000.0;
+const AGENT_READY_CHECK_MS: u64 = 250;
 
 #[derive(Clone, PartialEq)]
 enum Item {
@@ -283,7 +283,7 @@ fn color(c: u32) -> Hsla {
 pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl IntoElement {
     let state = notes();
     let width = signal(0.0_f32);
-    let is_omp = move || state.omp.with(|o| o.contains(&id));
+    let is_agent = move || state.agents.with(|o| o.contains(&id));
     // The deepest tab holding this cwd decides the group, so a home nested
     // under a member still wins.
     let group_memories = {
@@ -350,7 +350,7 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
     };
     let visible = {
         let items = items.clone();
-        move || is_omp() && !items().is_empty()
+        move || is_agent() && !items().is_empty()
     };
     let v = &BOLT_THEME.vars;
     let (surface, fg, accent, info) = (v.bg_surface, v.fg, v.accent, v.info);
@@ -442,7 +442,7 @@ pub fn strip(shell: Shell, id: u64, session_id: String, cwd: String) -> impl Int
 }
 
 /// A note's actions (the bubble's): inject and remove, inject, inject into
-/// a new omp, open, remove.
+/// a new agent, open, remove.
 fn note_actions(shell: Shell, id: u64, cwd: &str, path: &str) -> Vec<MenuItem> {
     let (p1, p2, p3, p4, p5) = (path.to_owned(), path.to_owned(), path.to_owned(), path.to_owned(), path.to_owned());
     let cwd = cwd.to_owned();
@@ -455,7 +455,7 @@ fn note_actions(shell: Shell, id: u64, cwd: &str, path: &str) -> Vec<MenuItem> {
         MenuItem::new("Inject").on_select(move || {
             inject(id, &p2);
         }),
-        MenuItem::new("Inject into new omp").on_select(move || inject_into_new_omp(shell, &cwd, &p3)),
+        MenuItem::new("Inject into new agent").on_select(move || inject_into_new_agent(shell, id, &cwd, &p3)),
         MenuItem::new("Open").on_select(move || {
             let _ = open_path(p4.clone());
         }),
@@ -510,20 +510,27 @@ fn remove(path: &str) {
     }
 }
 
-/// A fresh terminal here, `omp` typed into it, and the note pasted once omp
-/// is up: the status names omp and the program turned bracketed paste on
-/// (the shell turns it off to run a command, so it being on again means
-/// omp's editor asked for it).
-fn inject_into_new_omp(shell: Shell, cwd: &str, path: &str) {
+/// A fresh terminal here running the agent terminal `like` runs (its
+/// harness through [`engine::fleet::start_command`], another CLI by name),
+/// and the note pasted once the agent is up: the status names an agent and
+/// the program turned bracketed paste on (the shell turns it off to run a
+/// command, so it being on again means the agent's editor asked for it).
+fn inject_into_new_agent(shell: Shell, like: u64, cwd: &str, path: &str) {
     let Ok(text) = std::fs::read_to_string(path) else { return };
     let text = text.trim_end().to_owned();
+    let status = engine::terminal_status(like);
+    let command = match (status.harness(), status.agent) {
+        (Some(h), _) => engine::fleet::start_command(shell, h),
+        (None, Some(other)) => other,
+        (None, None) => engine::fleet::agent_command(shell),
+    };
     let Ok(new) = shell.open_terminal(cwd.to_owned()) else { return };
-    state::pty_write(new, "omp\r");
+    state::pty_write(new, &format!("{command}\r"));
     let started = nsh_core::time::unix_ms();
     spawn(async move {
-        while nsh_core::time::unix_ms() - started <= OMP_START_TIMEOUT_MS {
-            timer(Duration::from_millis(OMP_READY_CHECK_MS)).await;
-            if engine::terminal_status(new).agent.as_deref() == Some("omp") && state::bracketed(new) {
+        while nsh_core::time::unix_ms() - started <= AGENT_START_TIMEOUT_MS {
+            timer(Duration::from_millis(AGENT_READY_CHECK_MS)).await;
+            if engine::terminal_status(new).agent.is_some() && state::bracketed(new) {
                 state::paste(new, &text);
                 state::focus_terminal(new);
                 return;

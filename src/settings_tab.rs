@@ -1,12 +1,15 @@
 //! The Settings tab (Bolt's `SettingsTab`, opened by `settings`), with the
-//! settings this shell uses: Open in New Column, the agent command, and
-//! the keybindings file.
+//! settings this shell uses: Open in New Column, the agent command and its
+//! harness, and the keybindings file.
 
 use nsh_base::input;
 use nsh_core::prelude::*;
 
 use crate::{
-    hub::engine::fleet::{self, DEFAULT_AGENT_COMMAND},
+    hub::engine::{
+        agents::Harness,
+        fleet::{self, DEFAULT_AGENT_COMMAND},
+    },
     keybindings,
     state::Shell,
     theme::{BOLT_THEME, lighten},
@@ -46,6 +49,11 @@ pub fn settings_view(shell: Shell) -> AnyElement {
                     text_field(fleet::agent_command_setting(shell).unwrap_or_default(), format!("{DEFAULT_AGENT_COMMAND} (default)"), move |command| {
                         fleet::set_agent_command(shell, command)
                     }),
+                ))
+                .child(row(
+                    "Agent harness",
+                    "Which CLI the agent command starts. Headless hops and @bolt run on it, and its hops reopen through the agent command",
+                    choice(&Harness::ALL.map(|h| (h, h.id())), move || shell.settings.with(fleet::agent_harness_of), move |h| fleet::set_agent_harness(shell, h)),
                 ))
                 .child(view().h(px(24.0)))
                 .child(category("Keybindings"))
@@ -118,6 +126,29 @@ fn button(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElemen
         .hover(|s| s.bg(color(v.bg_hover)))
         .on_press(on_press)
         .child(text(label).text_xs().text_color(color(v.fg)))
+}
+
+/// One of a few values: a row of segments, the current one in the accent.
+fn choice<T: Copy + PartialEq + 'static>(options: &[(T, &'static str)], current: impl Fn() -> T + Clone + 'static, pick: impl Fn(T) + Clone + 'static) -> impl IntoElement {
+    let v = &BOLT_THEME.vars;
+    let (accent, widget, hover, border, fg) = (v.accent, v.bg_widget, v.bg_hover, v.border, v.fg);
+    let mut segments = view().flex_row().flex_shrink(0.0).gap_1();
+    for &(value, label) in options {
+        let (current, pick) = (current.clone(), pick.clone());
+        segments = segments.child(
+            view()
+                .px_2()
+                .py_1()
+                .rounded(px(4.0))
+                .border_1()
+                .border_color(color(border))
+                .bg(move || color(if current() == value { accent } else { widget }))
+                .hover(move |s| s.bg(color(hover)))
+                .on_press(move || pick(value))
+                .child(text(label).text_xs().text_color(color(fg))),
+        );
+    }
+    segments
 }
 
 /// Bolt's text setting: a one-line field, `placeholder` while empty. What

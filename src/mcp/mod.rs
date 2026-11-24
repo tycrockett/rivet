@@ -1,6 +1,6 @@
 //! Bolt's MCP server (`mcpServer.js`, its streamable HTTP transport): the
-//! `bolt` server omp and claude reach at `http://127.0.0.1:41777/mcp`
-//! (`~/.omp/agent/mcp.json`, `~/.claude.json`). JSON-RPC over `POST /mcp`,
+//! `bolt` server every agent reaches at `http://127.0.0.1:41777/mcp`
+//! (`~/.omp/agent/mcp.json`, `~/.claude.json`, `~/.codex/config.toml`). JSON-RPC over `POST /mcp`,
 //! batches allowed, notifications answered 202; `GET` 405, `DELETE` 204.
 //!
 //! A listener thread takes connections, one thread each. `initialize` and
@@ -40,7 +40,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::{hub::engine::spawn_root, state::Shell};
 
-/// Fixed, because `claude mcp add` and omp's `mcp.json` store a literal URL.
+/// Fixed, because `claude mcp add`, `codex mcp add` and omp's `mcp.json` store a literal URL.
 const PORT: u16 = 41777;
 /// Bolt's `HTTP_RETRY_MS`: while another app holds the port.
 const RETRY: Duration = Duration::from_secs(5);

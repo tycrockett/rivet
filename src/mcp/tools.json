@@ -519,7 +519,7 @@
         },
         "sessionId": {
           "type": "string",
-          "description": "Your Claude session id, if you know it. Makes finding your terminal exact."
+          "description": "Your agent session id (Claude's, Codex's or omp's), if you know it. Makes finding your terminal exact."
         }
       }
     }
@@ -536,7 +536,7 @@
         },
         "sessionId": {
           "type": "string",
-          "description": "Your Claude session id, if you know it. Makes finding your terminal exact."
+          "description": "Your agent session id (Claude's, Codex's or omp's), if you know it. Makes finding your terminal exact."
         }
       },
       "required": [
@@ -568,7 +568,7 @@
         },
         "sessionId": {
           "type": "string",
-          "description": "Your Claude session id, if you know it. Makes finding your terminal exact."
+          "description": "Your agent session id (Claude's, Codex's or omp's), if you know it. Makes finding your terminal exact."
         }
       },
       "required": [
@@ -590,7 +590,7 @@
         },
         "sessionId": {
           "type": "string",
-          "description": "Your Claude session id, if you know it. Makes finding your terminal exact."
+          "description": "Your agent session id (Claude's, Codex's or omp's), if you know it. Makes finding your terminal exact."
         },
         "nodes": {
           "type": "array",
@@ -681,7 +681,7 @@
         },
         "sessionId": {
           "type": "string",
-          "description": "Your Claude session id, if you know it."
+          "description": "Your agent session id (Claude's, Codex's or omp's), if you know it."
         }
       },
       "required": [
@@ -701,7 +701,7 @@
         },
         "sessionId": {
           "type": "string",
-          "description": "Your Claude session id, if you know it."
+          "description": "Your agent session id (Claude's, Codex's or omp's), if you know it."
         },
         "nodeIds": {
           "type": "array",

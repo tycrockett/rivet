@@ -4,10 +4,10 @@
 //! - [`types`]: Bolt command scripts: nodes, parser, pure helpers.
 //! - [`script`]: the node runner and the ways a line becomes a run.
 //! - [`fleet`]: posts to terminals, board notes, jobs, what comes back.
-//! - [`hop`]: headless claude hops.
+//! - [`hop`]: headless agent hops, on any [`agents::Harness`].
 //! - [`send`]: typing into terminals, held sends.
-//! - [`agents`]: a terminal's live status (`pty:status`) and claude's
-//!   transcript reads.
+//! - [`agents`]: a terminal's live status (`pty:status`) and its agent's
+//!   session reads.
 
 pub mod agents;
 pub mod fleet;
@@ -35,19 +35,25 @@ pub struct TermStatus {
     /// something runs in front of it (or an agent rests at its prompt),
     /// `agent` while an agent streams output.
     pub status: String,
-    /// The agent running in it: `claude` or `omp`.
+    /// The agent running in it: a [`agents::Harness`] id, or the name of
+    /// another agent CLI.
     pub agent: Option<String>,
     pub agent_pid: Option<u32>,
     /// What the chip shows: the agent's title and last prompt, else empty.
     pub label: String,
     /// The agent is blocked on a question for the user.
     pub needs_input: bool,
+    /// The agent's session says a turn is open (codex), which a dialog
+    /// waiting for an answer may be part of.
+    pub mid_turn: bool,
     /// The last prompt the user typed to the agent.
     pub prompt: Option<String>,
     /// The agent's own session id (what a fork resumes).
     pub agent_session_id: Option<String>,
     /// The agent's own `--resume` argument.
     pub agent_resume: Option<String>,
+    /// The session file the agent writes, which its brief is read from.
+    pub agent_transcript: Option<PathBuf>,
     /// When the terminal last printed (Unix ms).
     pub last_output_at: f64,
 }
@@ -60,6 +66,11 @@ impl TermStatus {
             .find(|s| !s.is_empty())
             .unwrap_or("idle")
             .to_owned()
+    }
+
+    /// The harness running in it, when its session can be read.
+    pub fn harness(&self) -> Option<agents::Harness> {
+        agents::Harness::from_id(self.agent.as_deref()?)
     }
 }
 

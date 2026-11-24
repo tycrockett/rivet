@@ -7,14 +7,15 @@ use std::{cell::RefCell, collections::HashMap, time::Duration};
 use nsh_core::{prelude::*, time::unix_ms};
 
 use crate::{
-    commands,
+    commands, git,
     hub::{Hop, Hub, HubEntry, HubMember, HubStep, HubTarget, JobStatus, ME, StepStatus, next_id, parse_post, targets},
+    settings::Settings,
     state::{self, Shell},
 };
 
 use super::{
-    agents,
-    hop::{HopResult, Role, fork_from, run_hop},
+    agents::{self, Harness},
+    hop::{HopResult, HopSpec, Role, fork_from, run_hop},
     send::{self, dispatch_to_terminals},
     spawn_root,
 };
@@ -65,6 +66,55 @@ pub fn set_agent_command(shell: Shell, command: &str) {
             s.extra.insert(AGENT_COMMAND_KEY.into(), command.into());
         }
     });
+}
+
+/// The `settings.extra` key of the harness the agent command starts.
+pub const AGENT_HARNESS_KEY: &str = "agentHarness";
+
+/// The harness the agent command is known to start: `settings.agentHarness`,
+/// else the one the command runs by name, else claude for the default `c`
+/// (Bolt's alias for it). None for an alias of the user's own.
+fn known_harness(s: &Settings) -> Option<Harness> {
+    let set = s.extra.get(AGENT_HARNESS_KEY).and_then(|v| v.as_str()).and_then(Harness::from_id);
+    let named = || match s.extra.get(AGENT_COMMAND_KEY).and_then(|v| v.as_str()).map(str::trim).filter(|c| !c.is_empty()) {
+        Some(command) => Harness::from_id(command.split_whitespace().next()?.rsplit('/').next()?),
+        None => Some(Harness::Claude),
+    };
+    set.or_else(named)
+}
+
+/// The harness fresh hops run on: the one the agent command starts, else
+/// claude.
+pub fn agent_harness_of(s: &Settings) -> Harness {
+    known_harness(s).unwrap_or_default()
+}
+
+pub fn agent_harness(shell: Shell) -> Harness {
+    shell.settings.with_untracked(agent_harness_of)
+}
+
+pub fn set_agent_harness(shell: Shell, harness: Harness) {
+    if shell.settings.with_untracked(|s| s.extra.get(AGENT_HARNESS_KEY).and_then(|v| v.as_str()) == Some(harness.id())) {
+        return;
+    }
+    shell.update_settings(|s| {
+        s.extra.insert(AGENT_HARNESS_KEY.into(), harness.id().into());
+    });
+}
+
+/// What starts `harness` in a terminal: the agent command, flags and all,
+/// when it is known to start that harness; else the harness by name.
+pub fn start_command(shell: Shell, harness: Harness) -> String {
+    if shell.settings.with_untracked(known_harness) == Some(harness) { agent_command(shell) } else { harness.id().to_owned() }
+}
+
+/// The line that reopens hop `session` of `harness` in a terminal.
+fn resume_command(shell: Shell, harness: Harness, session: &str) -> String {
+    let verb = match harness {
+        Harness::Claude | Harness::Omp => "--resume",
+        Harness::Codex => "resume",
+    };
+    format!("{} {verb} {}", start_command(shell, harness), git::shell_quote(session))
 }
 
 /// A new terminal in `cwd`, shown; its session id (`openWorkspaceTerminalAtom`).
@@ -189,7 +239,7 @@ pub fn new_job(id: String, ask: String, to: String, run: Option<String>, from: O
     }
 }
 
-/// A headless claude asked `member` and the card shows it (`runJob`).
+/// A headless agent asked `member` and the card shows it (`runJob`).
 pub async fn run_job(hub: Hub, member: &HubMember, ask: String, prompt: String, from: Option<String>, role: Role) -> HopResult {
     let id = next_id();
     let step = HubStep {
@@ -202,8 +252,8 @@ pub async fn run_job(hub: Hub, member: &HubMember, ask: String, prompt: String, 
         ended_at: None,
     };
     hub.post(new_job(id.clone(), ask, member.handle.clone(), None, from, vec![step]));
-    let resume = fork_from(hub.shell, member, role);
-    let hop = run_hop(&member.cwd, &prompt, resume, Some(&id)).await;
+    let spec = fork_from(hub.shell, member, role).unwrap_or_else(|| HopSpec::fresh(hub.shell));
+    let hop = run_hop(&member.cwd, &prompt, spec, Some(&id)).await;
     patch_job(hub, &id, |j| {
         let failed = hop.error.is_some();
         *j.status = if failed { JobStatus::Failed } else { JobStatus::Done };
@@ -261,7 +311,7 @@ pub fn open_hop(hub: Hub, job_id: &str) {
         return;
     };
     let Ok(session_id) = open_workspace_terminal(hub.shell, &hop.cwd) else { return };
-    dispatch_to_terminals(hub.shell, std::slice::from_ref(&session_id), &format!("{} --resume {}", agent_command(hub.shell), hop.session_id));
+    dispatch_to_terminals(hub.shell, std::slice::from_ref(&session_id), &resume_command(hub.shell, hop.harness, &hop.session_id));
     reveal_member(hub, &hop.cwd, Some(&session_id));
 }
 
@@ -366,7 +416,7 @@ pub fn fresh_replies(messages: &[(String, String)], seen: Option<&str>) -> (Vec<
     (replies, Some(after.last().map_or_else(|| seen.to_owned(), |m| m.1.clone())))
 }
 
-/// Surfaces a blocked claude's question, and the answer a terminal owes
+/// Surfaces a blocked agent's question, and the answer a terminal owes
 /// once it gives it (`ingestAsksAtom`).
 async fn ingest_asks(hub: Hub) {
     let shell = hub.shell;
@@ -375,7 +425,9 @@ async fn ingest_asks(hub: Hub) {
         let info = agents::status_of(term.id);
         let watched = AWAITING.with(|a| a.borrow().contains_key(&session_id));
         // Blocked is always worth surfacing; anything else only while an answer is owed.
-        let Some(pid) = info.agent_pid.filter(|_| info.agent.as_deref() == Some("claude")) else { continue };
+        if info.harness().is_none() || info.agent_pid.is_none() {
+            continue;
+        }
         if !info.needs_input && !watched {
             continue;
         }
@@ -385,7 +437,7 @@ async fn ingest_asks(hub: Hub) {
         READ_AT.with(|r| {
             r.borrow_mut().insert(session_id.clone(), info.last_output_at);
         });
-        let Some(brief) = agents::session_brief(pid) else { continue };
+        let Some(brief) = agents::session_brief(&info) else { continue };
 
         if let Some(q) = brief.pending_question {
             // toolUseId is stable while it waits and gone once answered, so it dedupes by itself.

@@ -13,10 +13,10 @@ use crate::hub::{HubTarget, engine};
 
 /// What `#` offers at a line's start (`NODE_WORDS`).
 const NODE_WORDS: &[(&str, &str)] = &[
-    ("ask", "[live] [{t1}] \"<question>\" [as $var[:type]] — no target asks a fresh claude, :type parses the answer"),
+    ("ask", "[live] [{t1}] \"<question>\" [as $var[:type]] — no target asks a fresh agent, :type parses the answer"),
     ("send", "\"<text>\" to {t1} [as $var] — types it into the terminal, as saves the output"),
-    ("read", "{t1} [as $var] — latest claude message or shell output"),
-    ("create", "{t1} terminal | claude | worktree …, tab \"path\", group \"name\""),
+    ("read", "{t1} [as $var] — latest agent message or shell output"),
+    ("create", "{t1} terminal | agent | worktree …, tab \"path\", group \"name\""),
     ("for-each", "{list} as $item — indent the body"),
     ("if", "{var} empty | not-empty | = value"),
     ("else", "under an #if, same indent"),
@@ -30,7 +30,7 @@ const TYPES: &[&str] = &["string", "string[]", "number", "boolean"];
 /// (`CREATE_OBJECTS`' `target` and `keys`); the hints come from the engine.
 const CREATE_OBJECTS: &[(&str, bool, &[&str])] = &[
     ("terminal", true, &[]),
-    ("claude", true, &[]),
+    ("agent", true, &[]),
     ("worktree", true, &["from", "in"]),
     ("tab", false, &["in"]),
     ("group", false, &["with"]),
@@ -257,7 +257,7 @@ pub fn suggestions(
         let lower = typed.to_lowercase();
         let mut items = Vec::new();
         if before == format!("@{typed}") && "bolt".starts_with(&lower) {
-            items.push(sug("@bolt ", "@bolt", "ask claude to drive Bolt"));
+            items.push(sug("@bolt ", "@bolt", "ask an agent to drive Bolt"));
         }
         items.extend(
             handles

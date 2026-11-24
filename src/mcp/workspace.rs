@@ -195,7 +195,7 @@ async fn run_command(shell: Shell, args: &Value) -> ToolResult {
     for cmd in &cmds {
         let verb = commands::parse(cmd).command;
         if !MCP_COMMANDS.contains(&verb.as_str()) {
-            return Err(format!("'{verb}' is not one Claude may run, so none of the batch ran. Allowed: {}.", MCP_COMMANDS.join(", ")));
+            return Err(format!("'{verb}' is not one an agent may run, so none of the batch ran. Allowed: {}.", MCP_COMMANDS.join(", ")));
         }
     }
 

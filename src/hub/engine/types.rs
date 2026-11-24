@@ -395,7 +395,7 @@ pub struct CreateObject {
 /// menu offers is a word the parser reads.
 pub const CREATE_OBJECTS: &[CreateObject] = &[
     CreateObject { name: "terminal", action: InAppAction::Terminal, quoted: "command", bare: false, target: true, keys: &[], need: &[], hint: "{t1} terminal \"npm run dev\" [as $term]" },
-    CreateObject { name: "claude", action: InAppAction::StartAgents, quoted: "prompt", bare: false, target: true, keys: &[], need: &[], hint: "{t1} claude \"prompt\" [as $term] — waits for claude" },
+    CreateObject { name: "agent", action: InAppAction::StartAgents, quoted: "prompt", bare: false, target: true, keys: &[], need: &[], hint: "{t1} agent \"prompt\" [as $term] — types the agent command, waits for the agent" },
     CreateObject { name: "worktree", action: InAppAction::CreateWorktrees, quoted: "branches", bare: true, target: true, keys: &["from", "in"], need: &["branches"], hint: "{t1} worktree \"a, b\" from main in x [as $wts]" },
     CreateObject { name: "tab", action: InAppAction::Tab, quoted: "path", bare: true, target: false, keys: &["in"], need: &["path"], hint: "tab \"/path/to/dir\" in x [as $tab]" },
     CreateObject { name: "group", action: InAppAction::Group, quoted: "name", bare: true, target: false, keys: &["with"], need: &["name", "tabs"], hint: "group \"name\" with {wts} [as $g]" },
@@ -404,9 +404,11 @@ pub const CREATE_OBJECTS: &[CreateObject] = &[
 /// `from`, `in` and `with` and the arg each one sets (`CREATE_WORDS`).
 pub const CREATE_WORDS: &[(&str, &str)] = &[("from", "parent"), ("in", "group"), ("with", "tabs")];
 
-const CREATE_SYNTAX: &str = "expected #create {target} terminal | claude | worktree …, #create tab \"path\" or #create group \"name\" with …";
+const CREATE_SYNTAX: &str = "expected #create {target} terminal | agent | worktree …, #create tab \"path\" or #create group \"name\" with …";
 
 fn create_object(name: &str) -> Option<&'static CreateObject> {
+    // Scripts saved before any harness could start read `claude` for `agent`.
+    let name = if name == "claude" { "agent" } else { name };
     CREATE_OBJECTS.iter().find(|o| o.name == name)
 }
 
@@ -1110,9 +1112,11 @@ mod tests {
             }
             n => panic!("{n:?}"),
         }
-        match one("#create claude {t1} \"fix it\"") {
-            BoltNode::InApp { action: InAppAction::StartAgents, args, .. } => assert_eq!((args["target"].as_str(), args["prompt"].as_str()), ("{t1}", "fix it")),
-            n => panic!("{n:?}"),
+        for line in ["#create agent {t1} \"fix it\"", "#create claude {t1} \"fix it\""] {
+            match one(line) {
+                BoltNode::InApp { action: InAppAction::StartAgents, args, .. } => assert_eq!((args["target"].as_str(), args["prompt"].as_str()), ("{t1}", "fix it")),
+                n => panic!("{n:?}"),
+            }
         }
         match one("#create {t1} worktree \"a, b\" from main in my cut as $wts") {
             BoltNode::InApp { action: InAppAction::CreateWorktrees, args, .. } => {

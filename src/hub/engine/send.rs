@@ -79,15 +79,17 @@ pub enum Readiness {
 }
 
 /// A terminal takes typed input at a prompt, the shell's or an agent's.
-/// An agent parked at its own prompt is `working` with an agent pid;
-/// `agent` means streaming, where a send would land mid-turn. `working`
-/// with no agent pid is some other foreground job, which owns the keyboard
-/// (`readiness`).
+/// A harness parked at its own prompt is `working` with an agent pid;
+/// `agent` means streaming, where a send would land mid-turn, and so does
+/// a turn its session says is still open (codex, whose approval dialogs
+/// it can't tell apart). `working` otherwise is some other foreground job,
+/// or an agent whose prompt can't be told from a dialog, which owns the
+/// keyboard (`readiness`).
 pub fn readiness(info: Option<&TermStatus>) -> Readiness {
     match info {
         None => Readiness::Gone,
         Some(i) if i.needs_input => Readiness::Blocked,
-        Some(i) if i.status == "idle" || (i.status == "working" && i.agent_pid.is_some()) => Readiness::Ready,
+        Some(i) if i.status == "idle" || (i.status == "working" && i.agent_pid.is_some() && i.harness().is_some() && !i.mid_turn) => Readiness::Ready,
         Some(_) => Readiness::Busy,
     }
 }

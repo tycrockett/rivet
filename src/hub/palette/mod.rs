@@ -367,10 +367,11 @@ impl Env {
             let forks = to.as_ref().and_then(|to| {
                 self.targets.with(|ts| ts.iter().find(|t| &t.handle == to).and_then(|t| t.members.first().and_then(|m| m.session_id.clone())))
             });
+            let harness = engine::fleet::agent_harness(hub.shell).id();
             let say = match (&forks, &to) {
-                (Some(_), Some(to)) => format!("forks @{to}'s claude to do it"),
-                (None, Some(to)) => format!("asks a new claude in @{to} to do it"),
-                _ => "asks a new claude to do it".to_owned(),
+                (Some(_), Some(to)) => format!("forks @{to}'s agent to do it"),
+                (None, Some(to)) => format!("asks a new {harness} in @{to} to do it"),
+                _ => format!("asks a new {harness} to do it"),
             };
             return Plan::sends(say, move || engine::chat_bolt(hub, ask.clone())).echoed();
         }

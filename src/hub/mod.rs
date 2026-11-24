@@ -4,7 +4,7 @@
 //! this app's data directory.
 //!
 //! - [`engine`]: what a sent line does — posts to terminals, headless
-//!   claude hops, Bolt commands and scripts (`fleetStore`'s hop half,
+//!   agent hops, Bolt commands and scripts (`fleetStore`'s hop half,
 //!   `boltCommandStore`, `terminalSendStore`).
 //! - [`palette`]: the palette and its cards (`BoltPalette`, `HubCards`,
 //!   `ScriptEditor`).
@@ -65,12 +65,15 @@ pub enum JobStatus {
     Failed,
 }
 
-/// A headless claude a job ran, which `openHop` picks up in a terminal.
+/// A headless agent a job ran, which `openHop` picks up in a terminal.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Hop {
     pub session_id: String,
     pub cwd: String,
+    /// What it ran on; hops saved before Rivet ran others were claude's.
+    #[serde(default)]
+    pub harness: engine::agents::Harness,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
