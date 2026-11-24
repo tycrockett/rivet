@@ -462,21 +462,21 @@ fn controls(bar: PrBar) -> AnyElement {
 /// How long the dialog takes to come in and to go (`nsh_base::sheet`'s).
 const DIALOG_IN_MS: f32 = 280.0;
 const DIALOG_OUT_MS: f32 = 200.0;
+/// The panel's scale as it comes in from, and goes to.
+const ENTER_SCALE: f32 = 0.95;
 
 /// The dialog's own motion, as `nsh_base::sheet` makes its own: the
-/// modal layer moves as one, so its slide would carry the backdrop up with
-/// the panel. The backdrop fades while the panel slides down from above
-/// the window, and back; the dialog stays in the view until it went.
+/// modal layer moves as one, so its scale would carry the backdrop with the
+/// panel. The backdrop fades while the panel fades and grows in at the
+/// window's center, and back; the dialog stays in the view until it went.
 #[derive(Clone, Copy)]
 struct DialogMotion {
     /// In the view: while open, and while it goes.
     mounted: Signal<bool>,
-    /// 0 gone, 1 there: the backdrop's opacity.
+    /// 0 gone, 1 there: the backdrop's and the panel's opacity.
     progress: AnimatedValue,
-    /// Where the panel starts: a window's height above its place.
-    away: AnimatedValue,
-    /// The panel's translation: `away` at 0, none at 1.
-    translate: AnimatedNode,
+    /// The panel's scale: `ENTER_SCALE` at 0, 1 at 1.
+    scale: AnimatedNode,
     /// Only the latest close unmounts: opened again on its way out, it stays.
     generation: Stored<u64>,
 }
@@ -484,12 +484,10 @@ struct DialogMotion {
 impl DialogMotion {
     fn new(owner: Owner, open: Memo<bool>) -> Self {
         let progress = animated_value(0.0);
-        let away = animated_value(0.0);
         let motion = Self {
             mounted: signal(false),
             progress,
-            away,
-            translate: away.mul(&progress.interpolate(&[0.0, 1.0], &[1.0, 0.0])),
+            scale: progress.interpolate(&[0.0, 1.0], &[ENTER_SCALE, 1.0]),
             generation: stored(0),
         };
         effect(move || {
@@ -505,7 +503,6 @@ impl DialogMotion {
         if open {
             if !self.mounted.get() {
                 self.progress.set(0.0);
-                self.away.set(-window().height.0);
                 self.mounted.set(true);
             }
             if reduce_motion() {
@@ -557,7 +554,8 @@ fn dialog(bar: PrBar, motion: DialogMotion) -> impl IntoElement {
                 .items_center()
                 .justify_center()
                 .pointer_events(PointerEvents::BoxNone)
-                .bind_translate_y(&motion.translate)
+                .bind_opacity(&motion.progress)
+                .bind_scale(&motion.scale)
                 .child(dynamic(move || {
                     let (detail, _) = bar.shown.get()?;
                     Some(untracked(|| panel(bar, detail)))

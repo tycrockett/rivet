@@ -1175,7 +1175,7 @@ fn chip_label(title: &str, label: &str) -> String {
     let mut parts: Vec<&str> = vec![title];
     parts.extend(label.split(" · ").map(str::trim).filter(|p| !title.ends_with(p)));
     parts.retain(|p| !p.is_empty());
-    parts.join(" · ")
+    crate::paths::tilde(&parts.join(" · "))
 }
 
 /// The strip's foot: the current directory's `branch · repo`, and at its
@@ -1193,7 +1193,7 @@ fn footer(shell: Shell) -> impl IntoElement {
                 let dir = shell.directory();
                 match shell.statuses.with(|m| m.get(&dir).cloned()) {
                     Some(s) => format!("{} · {}", s.branch, s.repo.unwrap_or_default()),
-                    None => dir,
+                    None => crate::paths::tilde(&dir),
                 }
             })
             .flex_1()

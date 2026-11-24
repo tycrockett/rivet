@@ -553,8 +553,7 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                     .or_else(|| t.path.clone())
                     .or_else(|| t.members.first().map(|m| m.cwd.clone()))
             })?;
-            let home = shell.settings.with(|s| s.home.clone());
-            Some(if !home.is_empty() && cwd.starts_with(&home) { format!("~{}", &cwd[home.len()..]) } else { cwd })
+            Some(crate::paths::tilde(&cwd))
         })
     };
     let (registry, menu) = slash_menu(shell);
@@ -860,7 +859,7 @@ fn frame(hub: Hub, open: PaletteOpen) -> AnyElement {
                         .gap_2()
                         .px_2()
                         .child(
-                            text(move || said.get().0)
+                            text(move || crate::paths::tilde(&said.get().0))
                                 .flex_1()
                                 .min_w(px(0.0))
                                 .number_of_lines(1)

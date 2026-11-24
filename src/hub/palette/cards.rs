@@ -14,6 +14,7 @@ use crate::{
         rich::{BranchList, Commit, GitStatus, Rich},
     },
     hub::{ChoiceOption, Hub, HubEntry, HubStep, JobStatus, ME, StepStatus, engine, finder_matches},
+    paths::tilde,
     state::Shell,
 };
 
@@ -429,7 +430,7 @@ pub fn result_card(shell: Shell, entry: &HubEntry, run: Rc<dyn Fn(String)>) -> A
     }
     if items.is_empty() {
         return match note {
-            Some(n) => view().flex_row().child(chip("⌨", n.clone(), muted())).into_element(),
+            Some(n) => view().flex_row().child(chip("⌨", tilde(n), muted())).into_element(),
             None => view().into_element(),
         };
     }
@@ -441,15 +442,16 @@ pub fn result_card(shell: Shell, entry: &HubEntry, run: Rc<dyn Fn(String)>) -> A
 }
 
 fn output_card(shell: Shell, o: &Output, run: Rc<dyn Fn(String)>) -> View {
+    let shown = tilde(&o.text);
     let body = match (&o.rich, o.key.as_str()) {
         _ if o.error => view()
             .flex_row()
             .items_start()
             .gap_2()
             .child(text("✕").text_size(px(11.0)).text_color(rgb(FG)))
-            .child(text(o.text.clone()).flex_1().text_size(px(11.0)).line_height(px(20.0)).text_color(rgb(FG))),
+            .child(text(shown).flex_1().text_size(px(11.0)).line_height(px(20.0)).text_color(rgb(FG))),
         (Some(Rich::Git { icon, detail }), _) => git_message(icon, &o.text, detail.as_deref()),
-        (Some(Rich::Direct), _) => mono(&o.text),
+        (Some(Rich::Direct), _) => mono(&shown),
         (Some(Rich::Conflict { files, directory, hint }), _) => conflict(shell, &o.text, files, directory, hint.as_deref()),
         (Some(Rich::Status(status)), _) => git_status(shell, status),
         (Some(Rich::Branches(list)), _) => branch_list(list, run),
@@ -459,8 +461,8 @@ fn output_card(shell: Shell, o: &Output, run: Rc<dyn Fn(String)>) -> View {
         (None, "branches") => branches(&o.text, run),
         (None, "directoryList") => directory_list(shell, &o.text, run),
         (None, "statusShow" | "stashShow") => diff_text(&o.text),
-        (None, "git" | "trace" | "gitStatus" | "pwd") => mono(&o.text),
-        (None, _) => view().child(text(o.text.clone()).text_size(px(12.0)).line_height(px(20.0)).text_color(rgb(FG))),
+        (None, "git" | "trace" | "gitStatus" | "pwd") => mono(&shown),
+        (None, _) => view().child(text(shown).text_size(px(12.0)).line_height(px(20.0)).text_color(rgb(FG))),
     };
     view().w_full().px_3().py_2().rounded(px(RADIUS)).overflow_hidden().bg(tint(o.error)).child(body)
 }
@@ -501,8 +503,8 @@ fn git_message(icon: &str, body: &str, detail: Option<&str>) -> View {
         .items_start()
         .gap_2()
         .child(text(glyph).text_size(px(12.0)).line_height(px(20.0)).text_color(rgb(color)))
-        .child(text(body.to_owned()).flex_1().text_size(px(12.0)).line_height(px(20.0)).text_color(rgb(FG)))
-        .when_some(detail.map(str::to_owned), |v, d| v.child(text(d).text_size(px(12.0)).line_height(px(20.0)).text_color(faint())))
+        .child(text(tilde(body)).flex_1().text_size(px(12.0)).line_height(px(20.0)).text_color(rgb(FG)))
+        .when_some(detail.map(tilde), |v, d| v.child(text(d).text_size(px(12.0)).line_height(px(20.0)).text_color(faint())))
 }
 
 /// A file a card lists: a click opens it in Helix (`openFileAtom`).
@@ -546,10 +548,10 @@ fn conflict(shell: Shell, title: &str, files: &[String], directory: &str, hint: 
                 .gap_2()
                 .mb_2()
                 .child(text("⚠").text_size(px(12.0)).text_color(rgb(0xfbbf24)))
-                .child(text(title.to_owned()).text_size(px(12.0)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(FG))),
+                .child(text(tilde(title)).text_size(px(12.0)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(FG))),
         )
         .child(list)
-        .when_some(hint.map(str::to_owned), |v, h| {
+        .when_some(hint.map(tilde), |v, h| {
             v.child(
                 view()
                     .flex_row()
@@ -738,7 +740,7 @@ fn bookmarks(items: &[(String, String)]) -> View {
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .child(text(path.clone()).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(14.0)).text_color(move || theme().foreground))
+                .child(text(tilde(path)).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(14.0)).text_color(move || theme().foreground))
                 .child(text(key.clone()).text_size(px(14.0)).text_color(rgb(crate::theme::BOLT_THEME.vars.accent))),
         );
     }
@@ -895,7 +897,7 @@ pub fn choice_card(hub: Hub, entry: &HubEntry) -> AnyElement {
     let label = if done {
         if picked.is_some() { "answered".to_owned() } else { "cancelled".to_owned() }
     } else {
-        format!("{title} · needs you")
+        format!("{} · needs you", tilde(title))
     };
     let mut c = card(false).child(
         view()
@@ -906,7 +908,7 @@ pub fn choice_card(hub: Hub, entry: &HubEntry) -> AnyElement {
             .pt(px(10.0))
             .pb_2()
             .child(chip("✋", label, if done { rgb(FG) } else { warning() }))
-            .when_some(detail.clone(), |v, d| {
+            .when_some(detail.as_deref().map(tilde), |v, d| {
                 v.child(text(d).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted()))
             }),
     );
@@ -940,8 +942,8 @@ pub fn choice_card(hub: Hub, entry: &HubEntry) -> AnyElement {
                         .px_1()
                         .child(text(o.key.clone()).uppercase().text_size(px(10.0)).font_weight(FontWeight::BOLD).text_color(tone)),
                 )
-                .child(text(o.label.clone()).text_size(px(12.0)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(FG)))
-                .when_some(o.hint.clone(), |v, h| {
+                .child(text(tilde(&o.label)).text_size(px(12.0)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(FG)))
+                .when_some(o.hint.as_deref().map(tilde), |v, h| {
                     v.child(text(h).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(faint()))
                 }),
         );
@@ -961,7 +963,7 @@ pub fn finder_card(shell: Shell) -> AnyElement {
                 .px_3()
                 .py(px(10.0))
                 .child(chip("▸", "finder closed", rgb(FG)))
-                .child(text(move || shell.settings.with(|s| s.directory.clone())).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted())),
+                .child(text(move || shell.settings.with(|s| tilde(&s.directory))).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted())),
         )
         .into_element()
 }
@@ -1030,7 +1032,7 @@ pub fn finder_panel(shell: Shell, hub: Hub, folders: Signal<Vec<String>>, go: Rc
                 .px_2()
                 .pb(px(6.0))
                 .child(chip("▸", "finder", rgb(FINDER_TONE)).flex_shrink(0.0))
-                .child(text(move || dir_of()).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted())),
+                .child(text(move || tilde(&dir_of())).flex_1().min_w(px(0.0)).number_of_lines(1).text_size(px(11.0)).text_color(muted())),
         )
         .child(
             scroll().max_h(px(200.0)).child(
@@ -1059,7 +1061,7 @@ pub fn finder_panel(shell: Shell, hub: Hub, folders: Signal<Vec<String>>, go: Rc
         let mut list = view();
         for (name, path) in marks {
             let cd = format!("cd {} --absolute", serde_json::to_string(&path).unwrap_or_default());
-            list = list.child(row(name, cd, Some(path), "🔖"));
+            list = list.child(row(name, cd, Some(tilde(&path)), "🔖"));
         }
         c = c.child(scroll().max_h(px(120.0)).mt_1().pt_1().border_t_1().border_color(line()).child(list));
     }
@@ -1116,9 +1118,9 @@ pub fn post_card(entry: &HubEntry, handle: Option<String>) -> AnyElement {
             Some(to) => format!("@{to} {body}"),
             None => body.clone(),
         };
-        painted(&said, true)
+        painted(&tilde(&said), true)
     } else {
-        view().child(text(body.clone()).text_size(px(12.0)).line_height(px(20.0)).text_color(muted()))
+        view().child(text(tilde(body)).text_size(px(12.0)).line_height(px(20.0)).text_color(muted()))
     };
     col.child(
         view()

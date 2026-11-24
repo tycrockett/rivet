@@ -161,9 +161,28 @@ pub fn terminals() -> impl IntoElement {
                         .child(column(shell, hub, id, joins, bar, layer))
                 })),
         )
+        .child(dynamic(move || layout.with(Vec::is_empty).then(|| empty(shell))))
         .child(layer.view(shell))
         .child(bar.view())
         .child(panes_overlay(shell))
+}
+
+/// A workspace with no tabs: its directory, large, in the top left. The
+/// tab rows that move the window are gone with the columns, so it does.
+fn empty(shell: Shell) -> impl IntoElement {
+    view()
+        .absolute()
+        .inset_0()
+        .pt(px(96.0))
+        .pl(px(96.0))
+        .pr(px(48.0))
+        .window_drag(true)
+        .child(
+            text(move || crate::paths::tilde(&shell.directory()))
+                .text_size(px(32.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(color(BOLT_THEME.vars.fg)),
+        )
 }
 
 /// A column's tab: a terminal, a file, a web page, the Changes or the
@@ -190,7 +209,7 @@ impl TabItem {
     fn label(&self) -> String {
         match self {
             TabItem::Term(t) if t.title.trim().is_empty() => format!("shell {}", t.id),
-            TabItem::Term(t) => t.title.clone(),
+            TabItem::Term(t) => crate::paths::tilde(&t.title),
             // Bolt's diff tab label (`Diff: <file name>`).
             TabItem::Doc(d) => {
                 let name = Path::new(&d.path).file_name().map_or_else(|| d.path.clone(), |n| n.to_string_lossy().into_owned());

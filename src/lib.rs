@@ -19,6 +19,7 @@ mod notes;
 mod panes;
 mod ports;
 mod pr_bar;
+mod paths;
 mod prs;
 mod pty;
 pub mod ptyd;
