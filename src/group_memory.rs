@@ -35,6 +35,11 @@ const OMP_PROMPT: &str = ".omp/APPEND_SYSTEM.md";
 /// never touched.
 const MEMBER_MARK: &str = "<!-- Bolt group member prompt: rewritten by Bolt, deleted when this tab leaves the group -->";
 
+/// How the group session's prompt opens, Rivet's and the Electron Bolt's:
+/// what `clear_home` knows a home's prompt by.
+const SESSION_LEAD: &str = "You are a group session for the Bolt workspace group";
+const BOLT_SESSION_LEAD: &str = "You are the group session for the Bolt workspace group";
+
 struct Member {
     group: String,
     /// The group's home, when it has one.
@@ -85,7 +90,7 @@ fn memories_section(dir: &str, memories: &[(String, String)]) -> String {
 /// rewritten.
 fn session_prompt(group: &str, path: &str, branch: &str, repo: &str, dir: &str, memories: &[(String, String)]) -> String {
     let lead = [
-        format!("You are a group session for the Bolt workspace group \"{group}\". Your worktree is {path}, on the group branch {branch} of the repo {repo}. Other sessions of this group may be running in the same worktree."),
+        format!("{SESSION_LEAD} \"{group}\". Your worktree is {path}, on the group branch {branch} of the repo {repo}. Other sessions of this group may be running in the same worktree."),
         format!("The group's other workspace tabs are worktrees for slices of the same work. Membership changes, so read it fresh with the Bolt MCP tool getWorkspaceTabs: your group is the one whose tab with groupHome true has the path {path}, and every other tab in that group is a member. Each member lists its mainRepoPath, branch, ahead/behind, dirty state and terminals."),
         "A group can span repos, and its members are of two kinds, which you tell apart by mainRepoPath:".to_owned(),
         format!("Branch members have mainRepoPath {repo}, the same repo as you. You write the shared code on the group branch and keep their branches in sync with it: merge the group branch into branch members that fall behind, and bring a branch member's work into the group branch when the user asks, resolving conflicts yourself."),
@@ -164,6 +169,14 @@ fn write_member(m: &Member) -> Result<(), String> {
 
 fn clear_member(path: &str) {
     if std::fs::read_to_string(format!("{path}/{OMP_PROMPT}")).is_ok_and(|c| c.starts_with(MEMBER_MARK)) {
+        remove_omp_prompt(path);
+    }
+}
+
+/// Deletes the group session's prompt from the home of a removed group, so
+/// an omp there no longer takes itself for one.
+pub fn clear_home(path: &str) {
+    if std::fs::read_to_string(format!("{path}/{OMP_PROMPT}")).is_ok_and(|c| c.starts_with(SESSION_LEAD) || c.starts_with(BOLT_SESSION_LEAD)) {
         remove_omp_prompt(path);
     }
 }

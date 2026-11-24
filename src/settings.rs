@@ -128,6 +128,19 @@ impl Settings {
             self.group_ids.insert(new.to_owned(), id);
         }
     }
+
+    /// Removes group `name`: its tabs stay, ungrouped, and its home leaves
+    /// the strip (its worktree stays on disk).
+    pub fn remove_group(&mut self, name: &str) {
+        self.groups.retain(|g| g != name);
+        self.tabs.retain(|t| !(t.home && t.group.as_deref() == Some(name)));
+        for t in self.tabs.iter_mut().chain(&mut self.pinned) {
+            if t.group.as_deref() == Some(name) {
+                t.group = None;
+            }
+        }
+        self.group_ids.remove(name);
+    }
 }
 
 /// Unique on this machine: the time in nanoseconds, then a counter for ids
@@ -268,5 +281,24 @@ mod tests {
     fn tab_names_drop_the_project_prefix() {
         assert_eq!(tab_name_for("/w/backend/mem-1389--08-metabase-view"), "08-metabase-view");
         assert_eq!(tab_name_for("/w/builder"), "builder");
+    }
+
+    #[test]
+    fn removing_a_group_ungroups_its_tabs_and_drops_its_home_and_id() {
+        let json = r#"{"groups":["g","h"],"tabs":[
+            {"name":"home","path":"/w/home","group":"g","hidden":true,"home":true},
+            {"name":"a","path":"/w/a","group":"g"},
+            {"name":"b","path":"/w/b","group":"h"}],
+            "pinned":[{"name":"p","path":"/w/p","group":"g"}]}"#;
+        let mut s: Settings = serde_json::from_str(json).unwrap();
+        s.assign_group_ids();
+        let h = s.group_ids["h"].clone();
+        s.remove_group("g");
+        assert_eq!(s.groups, ["h"]);
+        let tabs: Vec<(&str, Option<&str>)> = s.tabs.iter().chain(&s.pinned).map(|t| (t.path.as_str(), t.group.as_deref())).collect();
+        assert_eq!(tabs, [("/w/a", None), ("/w/b", Some("h")), ("/w/p", None)]);
+        assert!(!s.assign_group_ids());
+        assert_eq!(s.group_ids.keys().collect::<Vec<_>>(), ["h"]);
+        assert_eq!(s.group_ids["h"], h);
     }
 }

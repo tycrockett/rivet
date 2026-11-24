@@ -30,9 +30,10 @@ use crate::{
     commands,
     drag::{self, Item},
     git,
+    group_memory,
     hints::{self, Opts},
     hub::{self, ChoiceOption, Hub, engine::TermStatus},
-    ports,
+    notes, ports,
     prs::{self, Badge, Pr},
     settings::{Settings, Tab},
     state::{Shell, shell},
@@ -390,14 +391,14 @@ fn strip(hub: Hub, live: Live, s: &Settings, c: &Collapse, chipped: &HashSet<Str
         let pinned_chips = pinned.iter().any(|t| has(&t.path));
         // Only what the collapse hid: a surviving row shows its own chips.
         let hidden: Vec<String> = pinned.iter().filter(|t| !c.pinned_shown(has(&t.path))).map(|t| t.path.clone()).collect();
+        let locked = c.pinned_locked;
         out.push(section(
             "sidebar-chrome",
             list,
             if c.pinned_collapsed { "▸ Pinned" } else { "▾ Pinned" }.to_owned(),
-            c.pinned_locked,
             c.pinned_collapsed.then(|| summary(live, shell, hidden)),
             move || shell.change_collapse(|c| c.toggle_pinned(pinned_chips, true)),
-            move || shell.collapse.update(|c| c.pinned_locked = !c.pinned_locked),
+            move || vec![lock_item(locked, move || shell.collapse.update(|c| c.pinned_locked = !c.pinned_locked))],
         ));
         out.extend(
             pinned
@@ -408,7 +409,8 @@ fn strip(hub: Hub, live: Live, s: &Settings, c: &Collapse, chipped: &HashSet<Str
     }
     let visible: Vec<Tab> = s.tabs.iter().filter(|t| !t.hidden).cloned().collect();
     let (groups, ungrouped) = bucket_by_group(&visible, &s.groups);
-    for bucket in groups.into_iter().filter(|b| !b.rows.is_empty()) {
+    // Empty groups too, so they can be dropped onto and removed.
+    for bucket in groups {
         let name = bucket.name.clone();
         let home = group_home(s, &name);
         let has_chips = home.is_some_and(|h| has(&h.path)) || bucket.rows.iter().any(|t| has(&t.path));
@@ -422,15 +424,20 @@ fn strip(hub: Hub, live: Live, s: &Settings, c: &Collapse, chipped: &HashSet<Str
             .map(|t| t.path.clone())
             .chain(home.map(|h| h.path.clone()))
             .collect();
-        let (press_name, lock_name) = (name.clone(), name.clone());
+        let (press_name, menu_name, locked) = (name.clone(), name.clone(), c.is_locked(&name));
         let heading = section(
             "workspace-group",
             list,
             format!("{} {name}", if collapsed { "▸" } else { "▾" }),
-            c.is_locked(&name),
             collapsed.then(|| summary(live, shell, hidden)),
             move || shell.change_collapse(|c| c.toggle_group(&press_name, has_chips, has_home, true)),
-            move || shell.collapse.update(|c| c.toggle_group_lock(&lock_name)),
+            move || {
+                let (lock_name, remove_name) = (menu_name.clone(), menu_name.clone());
+                vec![
+                    lock_item(locked, move || shell.collapse.update(|c| c.toggle_group_lock(&lock_name))),
+                    MenuItem::new("Remove Group…").destructive(true).on_select(move || request_remove_group(hub, remove_name.clone())),
+                ]
+            },
         );
         out.push(draggable(shell, heading, Item::Header(Some(name.clone()))));
         out.extend(bucket.rows.iter().filter(|t| c.row_shown(&name, has(&t.path))).map(|t| {
@@ -585,19 +592,18 @@ fn draggable(shell: Shell, el: AnyElement, item: Item) -> AnyElement {
 }
 
 /// A section's heading: a click moves its collapse one step, the context
-/// menu locks it against ⌘0. Hovered, it takes the rows' hover background;
-/// its text sits where a plain heading's does, and collapsed, the badge of
-/// what it hides sits at its end. ⌘⏎ labels it under `group`.
+/// menu shows `menu` (locking it against ⌘0, removing a group). Hovered, it
+/// takes the rows' hover background; its text sits where a plain heading's
+/// does, and collapsed, the badge of what it hides sits at its end. ⌘⏎
+/// labels it under `group`.
 fn section(
     group: &'static str,
     list: ElementRef,
     label: String,
-    locked: bool,
     badge: Option<AnyElement>,
     on_press: impl Fn() + Clone + 'static,
-    on_lock: impl Fn() + 'static,
+    menu: impl Fn() -> Vec<MenuItem> + 'static,
 ) -> AnyElement {
-    let on_lock = Rc::new(on_lock);
     let heading = view()
         .mx_2()
         .mt_2()
@@ -609,13 +615,15 @@ fn section(
         .hover(|s| s.bg(move || theme().sidebar_accent.opacity(0.6)))
         .on_press(on_press.clone())
         .on_context_menu(move |_: &ContextMenuEvent| {
-            let on_lock = on_lock.clone();
-            let item = MenuItem::new(if locked { "Unlock" } else { "Lock" }).on_select(move || on_lock());
-            let _ = popup_menu(vec![item]);
+            let _ = popup_menu(menu());
         })
         .child(heading_text(label).flex_1())
         .when_some(badge, |v, b| v.child(b));
     hints::hint(heading, group, Opts::default(), Some(list), on_press).into_element()
+}
+
+fn lock_item(locked: bool, on_lock: impl Fn() + 'static) -> MenuItem {
+    MenuItem::new(if locked { "Unlock" } else { "Lock" }).on_select(on_lock)
 }
 
 fn heading(label: impl Into<SharedString>) -> View {
@@ -1066,6 +1074,59 @@ pub fn request_close_tab(hub: Hub, path: String) {
             Some("a") => close_tab_all(shell, path),
             Some("s") => drop_tab(shell, &path),
             _ => {}
+        },
+    );
+}
+
+/// Asks, then removes group `name`: its tabs stay, ungrouped; its home
+/// leaves the strip with the group session's prompt (its worktree stays on
+/// disk); its memories are deleted, as the sessions' prompts promise.
+fn request_remove_group(hub: Hub, name: String) {
+    let shell = hub.shell;
+    let (home, dir, tabs) = shell.settings.with_untracked(|s| {
+        let tabs = s.tabs.iter().chain(&s.pinned).filter(|t| !t.home && t.group.as_deref() == Some(name.as_str())).count();
+        (group_home(s, &name).map(|t| t.path.clone()), notes::memories_dir(s, &name), tabs)
+    });
+    let memories = dir.as_deref().map_or(0, |d| notes::md_files(d).len());
+    let count = |n: usize, one: &str, many: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {many}") };
+    let mut parts = Vec::new();
+    if tabs > 0 {
+        parts.push(format!("ungroup its {}", count(tabs, "tab", "tabs")));
+    }
+    if home.is_some() {
+        parts.push("close its home (the worktree stays)".to_owned());
+    }
+    if memories > 0 {
+        parts.push(format!("delete its {}", count(memories, "memory", "memories")));
+    }
+    let hint = if parts.is_empty() { "It has no tabs or memories".to_owned() } else { format!("Remove it, {}", parts.join(", ")) };
+    let option = |key: &str, label: &str, hint: &str, tone: &str| ChoiceOption {
+        key: key.into(),
+        label: label.into(),
+        hint: Some(hint.into()),
+        tone: Some(tone.into()),
+    };
+    hub.ask_choice(
+        "Remove group".into(),
+        Some(name.clone()),
+        vec![
+            option("a", "Remove group", &hint, "var(--theme-error)"),
+            option("d", "Cancel", "Keep the group", "var(--theme-fg-muted)"),
+        ],
+        move |key| {
+            if key.as_deref() != Some("a") {
+                return;
+            }
+            shell.update_settings(|s| s.remove_group(&name));
+            if let Some(home) = home {
+                group_memory::clear_home(&home);
+            }
+            if let Some(folder) = dir.as_deref().and_then(std::path::Path::parent)
+                && let Err(e) = std::fs::remove_dir_all(folder)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!("rivet: group {name}: memories not deleted: {e}");
+            }
         },
     );
 }
